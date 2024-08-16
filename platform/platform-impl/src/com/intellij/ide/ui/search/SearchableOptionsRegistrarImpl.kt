@@ -1,9 +1,11 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 @file:Suppress("ReplaceGetOrSet")
+@file:OptIn(ExperimentalCoroutinesApi::class)
 
 package com.intellij.ide.ui.search
 
 import com.intellij.CommonBundle
+import com.intellij.diagnostic.PluginException
 import com.intellij.ide.plugins.DynamicPluginListener
 import com.intellij.ide.plugins.IdeaPluginDescriptor
 import com.intellij.ide.ui.search.SearchableOptionsRegistrar.SETTINGS_GROUP_SEPARATOR
@@ -15,44 +17,45 @@ import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurableGroup
 import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.options.ex.ConfigurableExtensionPointUtil
-import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.Comparing
 import com.intellij.openapi.util.NlsSafe
-import com.intellij.openapi.util.text.StringUtil
-import com.intellij.openapi.util.text.Strings
 import com.intellij.util.ResourceUtil
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runBlocking
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.annotations.TestOnly
 import java.io.IOException
-import java.util.Collections
-import java.util.HashMap
 import java.util.HashSet
 import java.util.LinkedHashSet
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.regex.Pattern
 import java.util.stream.Stream
 import javax.swing.event.DocumentEvent
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
 
 private val LOG = logger<SearchableOptionsRegistrarImpl>()
 private val EP_NAME = ExtensionPointName<SearchableOptionContributor>("com.intellij.search.optionContributor")
 internal val WORD_SEPARATOR_CHARS: @NonNls Pattern = Pattern.compile("[^-\\pL\\d#+]+")
 
 @ApiStatus.Internal
-class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
-  // option => array of packed OptionDescriptor
-  @Volatile
-  private var storage: Map<String, LongArray> = emptyMap()
-
+class SearchableOptionsRegistrarImpl(private val coroutineScope: CoroutineScope) : SearchableOptionsRegistrar() {
   private val stopWords: Set<String>
 
   @Volatile
   private var highlightOptionToSynonym = emptyMap<Pair<String, String>, MutableSet<String>>()
 
-  private val isInitialized = AtomicBoolean()
+  // option => array of packed OptionDescriptor
+  @Volatile
+  private var storage: Deferred<Map<String, LongArray>>? = null
 
   @Volatile
-  private var identifierTable = IndexedCharsInterner()
+  private var identifierTable: IndexedCharsInterner? = null
 
   init {
     val app = ApplicationManager.getApplication()
@@ -61,6 +64,7 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     }
     else {
       stopWords = loadStopWords()
+      startLoading()
 
       app.getMessageBus().simpleConnect().subscribe<DynamicPluginListener>(DynamicPluginListener.TOPIC, object : DynamicPluginListener {
         override fun pluginLoaded(pluginDescriptor: IdeaPluginDescriptor) {
@@ -104,50 +108,84 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
 
   @Synchronized
   private fun dropStorage() {
-    storage = HashMap<String, LongArray>()
-    isInitialized.set(false)
+    storage?.cancel()
+    storage = null
+    identifierTable = null
+    highlightOptionToSynonym = emptyMap()
   }
 
-  fun isInitialized(): Boolean {
-    return isInitialized.get()
+  fun isInitialized(): Boolean = storage?.isCompleted == true
+
+  @TestOnly
+  fun initializeBlocking() {
+    @Suppress("SSBasedInspection")
+    runBlocking(Dispatchers.Default) {
+      initialize()
+    }
+  }
+
+  @Synchronized
+  private fun startLoading(): Deferred<Map<String, LongArray>> {
+    storage?.let {
+      return it
+    }
+
+    val job = coroutineScope.async(Dispatchers.IO) {
+      doInitialize()
+    }
+    storage = job
+    return job
   }
 
   @ApiStatus.Internal
-  @Synchronized
-  fun initialize() {
-    if (!isInitialized.compareAndSet(false, true)) {
-      return
-    }
+   suspend fun initialize() {
+     (storage ?: startLoading()).await()
+  }
 
+  private suspend fun doInitialize(): Map<String, LongArray> {
     val processor = MySearchableOptionProcessor(stopWords)
     try {
-      EP_NAME.forEachExtensionSafe { it.processOptions(processor) }
+      for (extension in EP_NAME.filterableLazySequence()) {
+        coroutineContext.ensureActive()
+
+        try {
+          extension.instance?.contribute(processor)
+        }
+        catch (e: CancellationException) {
+          throw e
+        }
+        catch (e: Throwable) {
+          LOG.error(PluginException(e, extension.pluginDescriptor.pluginId))
+        }
+      }
+
+      coroutineContext.ensureActive()
+
+      highlightOptionToSynonym = processor.computeHighlightOptionToSynonym()
+      identifierTable = processor.identifierTable
+
+      return processor.storage
     }
-    catch (e: ProcessCanceledException) {
+    catch (e: CancellationException) {
       LOG.warn("=== Search storage init canceled ===")
-      isInitialized.set(false)
       throw e
     }
-
-    // index
-    highlightOptionToSynonym = processor.computeHighlightOptionToSynonym()
-
-    storage = processor.storage
-    identifierTable = processor.identifierTable
   }
 
   /**
    * Retrieves all searchable option names.
    */
   @ApiStatus.Internal
-  fun getAllOptionNames(): Set<String> = storage.keys
+  fun getAllOptionNames(): Set<String> = storage?.takeIf { it.isCompleted }?.getCompleted()?.keys ?: emptySet()
 
   @ApiStatus.Internal
-  fun getStorage(): Map<String, LongArray> = java.util.Map.copyOf(storage)
+  fun getStorage(): Sequence<Pair<String, Sequence<OptionDescription>>> {
+    val storage = storage?.takeIf { it.isCompleted }?.getCompleted() ?: return emptySequence()
+    return storage.asSequence().map { (k, v) -> k to v.asSequence().map { unpack(it)} }
+  }
 
   @Suppress("LocalVariableName")
-  @ApiStatus.Internal
-  fun unpack(data: Long): OptionDescription {
+  private fun unpack(data: Long): OptionDescription {
     val _groupName = (data shr 48 and 0xffffL).toInt()
     val _id = (data shr 32 and 0xffffL).toInt()
     val _hit = (data shr 16 and 0xffffL).toInt()
@@ -157,16 +195,24 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     assert( /*_path >= 0 && */_path <= Short.Companion.MAX_VALUE)
     assert( /*_groupName >= 0 && */_groupName <= Short.Companion.MAX_VALUE)
 
+    val identifierTable = identifierTable!!
     val groupName = if (_groupName == Short.MAX_VALUE.toInt()) null else identifierTable.fromId(_groupName)
-    val configurableId = identifierTable.fromId(_id).toString()
-    val hit = if (_hit == Short.MAX_VALUE.toInt()) null else identifierTable.fromId(_hit).toString()
-    val path = if (_path == Short.MAX_VALUE.toInt()) null else identifierTable.fromId(_path).toString()
+    val configurableId = identifierTable.fromId(_id)
+    val hit = if (_hit == Short.MAX_VALUE.toInt()) null else identifierTable.fromId(_hit)
+    val path = if (_path == Short.MAX_VALUE.toInt()) null else identifierTable.fromId(_path)
 
     return OptionDescription(_option = null, configurableId = configurableId, hit = hit, path = path, groupName = groupName)
   }
 
+  @Suppress("LocalVariableName")
+  private fun unpackConfigurableId(data: Long): String {
+    val _id = (data shr 32 and 0xffffL).toInt()
+    assert(_id < Short.Companion.MAX_VALUE)
+    return identifierTable!!.fromId(_id)
+  }
+
   override fun getConfigurables(
-    groups: MutableList<out ConfigurableGroup>,
+    groups: List<ConfigurableGroup>,
     type: DocumentEvent.EventType?,
     previouslyFiltered: MutableSet<out Configurable>?,
     option: String,
@@ -177,14 +223,14 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
       previouslyFiltered = null
     }
 
-    val optionToCheck = Strings.toLowerCase(option.trim { it <= ' ' })
+    @Suppress("HardCodedStringLiteral")
+    val optionToCheck = option.trim().lowercase()
 
-    val foundByPath = findGroupsByPath(groups, optionToCheck)
-    if (foundByPath != null) {
-      return foundByPath
+    findGroupsByPath(groups, optionToCheck)?.let {
+      return it
     }
 
-    val effectiveConfigurables: MutableSet<Configurable> = LinkedHashSet<Configurable>()
+    val effectiveConfigurables = LinkedHashSet<Configurable>()
     if (previouslyFiltered == null) {
       for (group in groups) {
         processExpandedGroups(group, effectiveConfigurables)
@@ -209,7 +255,7 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     else {
       for (each in effectiveConfigurables) {
         val displayName = each.getDisplayName()
-        if (displayName != null && StringUtil.containsIgnoreCase(displayName, optionToCheck)) {
+        if (displayName != null && displayName.contains(optionToCheck, ignoreCase = true)) {
           nameFullHits.add(each)
           nameHits.add(each)
         }
@@ -217,14 +263,14 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     }
 
     // operate with substring
-    val descriptionOptions: MutableSet<String?> = HashSet<String?>()
+    val descriptionOptions = HashSet<String>()
     if (options.isEmpty()) {
       val components = WORD_SEPARATOR_CHARS.split(optionToCheck)
-      if (components.size > 0) {
-        Collections.addAll<String?>(descriptionOptions, *components)
+      if (components.isEmpty()) {
+        descriptionOptions.add(option)
       }
       else {
-        descriptionOptions.add(option)
+        descriptionOptions.addAll(components)
       }
     }
     else {
@@ -233,45 +279,62 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
 
     val foundIds = findConfigurablesByDescriptions(descriptionOptions)
     if (foundIds == null) {
-      return ConfigurableHit(nameHits = nameHits, nameFullHits = nameFullHits, contentHits = setOf<Configurable>(), spotlightFilter = option)
+      return ConfigurableHit(
+        nameHits = nameHits,
+        nameFullHits = nameFullHits,
+        contentHits = emptyList(),
+        spotlightFilter = option,
+      )
     }
 
     val contentHits = filterById(effectiveConfigurables, foundIds)
 
     if (type == DocumentEvent.EventType.CHANGE && previouslyFiltered != null && effectiveConfigurables.size == contentHits.size) {
-      return getConfigurables(groups, DocumentEvent.EventType.CHANGE, null, option, project)
+      return getConfigurables(
+        groups = groups,
+        type = DocumentEvent.EventType.CHANGE,
+        previouslyFiltered = null,
+        option = option,
+        project = project,
+      )
     }
-    return ConfigurableHit(
-      nameHits = nameHits,
-      nameFullHits = nameFullHits,
-      contentHits = LinkedHashSet(contentHits),
-      spotlightFilter = option,
-    )
+    else {
+      return ConfigurableHit(
+        nameHits = nameHits,
+        nameFullHits = nameFullHits,
+        contentHits = contentHits,
+        spotlightFilter = option,
+      )
+    }
   }
 
-  private fun findConfigurablesByDescriptions(descriptionOptions: MutableSet<String?>): MutableSet<String>? {
-    var helpIds: MutableSet<String>? = null
+  private fun findConfigurablesByDescriptions(descriptionOptions: Set<String>): MutableSet<String>? {
+    var result: MutableSet<String>? = null
     for (prefix in descriptionOptions) {
-      val optionIds = getAcceptableDescriptions(prefix)
-      if (optionIds == null) {
-        return null
+      val ids = HashSet<String>()
+      for (longs in findAcceptablePackedDescriptions(prefix) ?: return null) {
+        for (l in longs) {
+          ids.add(unpackConfigurableId(l))
+        }
       }
-
-      val ids: MutableSet<String> = HashSet<String>()
-      for (id in optionIds) {
-        ids.add(id.configurableId!!)
+      if (result == null) {
+        result = ids
       }
-      if (helpIds == null) {
-        helpIds = ids
+      else {
+        result.retainAll(ids)
       }
-      helpIds.retainAll(ids)
     }
-    return helpIds
+    return result
   }
 
-  @Synchronized
-  fun getAcceptableDescriptions(prefix: String?): MutableSet<OptionDescription>? {
-    if (prefix == null) {
+  fun findAcceptableDescriptions(prefix: String): Sequence<OptionDescription>? {
+    return findAcceptablePackedDescriptions(prefix)?.flatMap { data -> data.asSequence().map { unpack(it)} }
+  }
+
+  private fun findAcceptablePackedDescriptions(prefix: String): Sequence<LongArray>? {
+    val storage = storage?.takeIf { it.isCompleted }?.getCompleted()
+    if (storage == null) {
+      LOG.error("Not yet initialized")
       return null
     }
 
@@ -280,26 +343,19 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
       return null
     }
 
-    initialize()
-
-    var result: MutableSet<OptionDescription>? = null
-    for (entry in storage.entries) {
-      val descriptions = entry.value
-      val option = entry.key
-      if (!option.startsWith(prefix) && !option.startsWith(stemmedPrefix)) {
-        val stemmedOption = PorterStemmerUtil.stem(option)
-        if (stemmedOption != null && !stemmedOption.startsWith(prefix) && !stemmedOption.startsWith(stemmedPrefix)) {
-          continue
+    return sequence {
+      for (entry in storage.entries) {
+        val option = entry.key
+        if (!option.startsWith(prefix) && !option.startsWith(stemmedPrefix)) {
+          val stemmedOption = PorterStemmerUtil.stem(option)
+          if (stemmedOption != null && !stemmedOption.startsWith(prefix) && !stemmedOption.startsWith(stemmedPrefix)) {
+            continue
+          }
         }
-      }
-      if (result == null) {
-        result = HashSet<OptionDescription>()
-      }
-      for (description in descriptions) {
-        result.add(unpack(description))
+
+        yield(entry.value)
       }
     }
-    return result
   }
 
   private fun getOptionDescriptionsByWords(
@@ -307,16 +363,11 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     words: MutableSet<String>,
   ): MutableSet<OptionDescription>? {
     var path: MutableSet<OptionDescription>? = null
-
     for (word in words) {
-      val configs = getAcceptableDescriptions(word)
-      if (configs == null) {
-        return null
-      }
-
-      val paths: MutableSet<OptionDescription> = HashSet<OptionDescription>()
+      val configs = findAcceptableDescriptions(word) ?: return null
+      val paths = HashSet<OptionDescription>()
       for (config in configs) {
-        if (Comparing.strEqual(config.configurableId, configurable.getId())) {
+        if (config.configurableId == configurable.getId()) {
           paths.add(config)
         }
       }
@@ -329,7 +380,6 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
   }
 
   override fun getInnerPaths(configurable: SearchableConfigurable, option: String): MutableSet<String> {
-    initialize()
     val words = getProcessedWordsWithoutStemming(option)
     val path = getOptionDescriptionsByWords(configurable, words)
 
@@ -337,14 +387,14 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
       return mutableSetOf<String>()
     }
 
-    val resultSet: MutableSet<String> = HashSet<String>()
+    val resultSet = HashSet<String>()
     var theOnlyResult: OptionDescription? = null
     for (description in path) {
       val hit = description.hit
       if (hit != null) {
         var theBest = true
         for (word in words) {
-          if (!StringUtil.containsIgnoreCase(hit, word)) {
+          if (!hit.contains(word, ignoreCase = true)) {
             theBest = false
             break
           }
@@ -369,12 +419,10 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     return resultSet
   }
 
-  override fun isStopWord(word: String?): Boolean {
-    return stopWords.contains(word)
-  }
+  override fun isStopWord(word: String?): Boolean = stopWords.contains(word)
 
   override fun getProcessedWordsWithoutStemming(text: String): MutableSet<String> {
-    val result: MutableSet<String> = HashSet<String>()
+    val result = HashSet<String>()
     collectProcessedWordsWithoutStemming(text = text, result = result, stopWords = stopWords)
     return result
   }
@@ -391,7 +439,6 @@ class SearchableOptionsRegistrarImpl : SearchableOptionsRegistrar() {
     }
 
     val result = HashSet<String>(options)
-    initialize()
     for (option in options) {
       val synonyms = highlightOptionToSynonym.get(option to configurable.getId())
       if (synonyms == null) {
@@ -437,7 +484,7 @@ private fun filterById(configurables: Set<Configurable>, configurableIds: Set<St
   }
 }
 
-private fun findGroupsByPath(groups: MutableList<out ConfigurableGroup>, path: String): ConfigurableHit? {
+private fun findGroupsByPath(groups: List<ConfigurableGroup>, path: String): ConfigurableHit? {
   val split = parseSettingsPath(path)
   if (split.isNullOrEmpty()) {
     return null
@@ -464,7 +511,7 @@ private fun findGroupsByPath(groups: MutableList<out ConfigurableGroup>, path: S
     lastMatchedIndex = i
 
     if (matched is Configurable.Composite) {
-      current = (matched as Configurable.Composite).getConfigurables().asList()
+      current = matched.getConfigurables().asList()
     }
     else {
       break
@@ -481,7 +528,7 @@ private fun findGroupsByPath(groups: MutableList<out ConfigurableGroup>, path: S
     ""
   }
 
-  val hits = setOf(lastMatched)
+  val hits = listOf(lastMatched)
   return ConfigurableHit(nameHits = hits, nameFullHits = hits, contentHits = hits, spotlightFilter = spotlightFilter)
 }
 

@@ -1,6 +1,7 @@
 // Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.uast.test.common.kotlin
 
+import com.intellij.lang.jvm.JvmModifier
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.platform.uast.testFramework.env.findElementByText
@@ -9,7 +10,6 @@ import com.intellij.platform.uast.testFramework.env.findUElementByTextFromPsi
 import com.intellij.psi.*
 import com.intellij.psi.impl.source.PsiClassReferenceType
 import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.util.parentOfType
 import com.intellij.testFramework.UsefulTestCase
 import com.intellij.testFramework.fixtures.JavaCodeInsightTestFixture
 import com.intellij.testFramework.replaceService
@@ -398,7 +398,52 @@ interface UastResolveApiFixtureTestBase {
         TestCase.assertEquals(PsiTypes.intType(), functionCall.getExpressionType())
     }
 
-    fun checkLocalResolve(myFixture: JavaCodeInsightTestFixture) {
+    fun checkLocalResolve_class(myFixture: JavaCodeInsightTestFixture) {
+        myFixture.configureByText(
+            "main.kt", """
+                fun test() {
+                  class LocalClass(i: Int)
+                  
+                  val lc = LocalClass(42)
+                  
+                  class LocalClassWithImplicitConstructor
+                  
+                  val lcwic = LocalClassWithImplicitConstructor()
+                  
+                  class LocalClassWithGeneric<T>(t: T)
+                  
+                  val lgc = LocalClassWithGeneric<String>("hi")
+                }
+            """.trimIndent()
+        )
+        myFixture.file.toUElement()!!.accept(
+            object : AbstractUastVisitor() {
+                override fun visitCallExpression(node: UCallExpression): Boolean {
+                    val resolved = node.resolve()
+                    TestCase.assertNotNull(resolved)
+                    TestCase.assertTrue(resolved!!.isConstructor)
+
+                    val resolvedViaReference = node.classReference?.resolve()
+                    TestCase.assertNotNull(resolvedViaReference)
+                    TestCase.assertTrue(resolvedViaReference is PsiClass)
+                    TestCase.assertTrue((resolvedViaReference as PsiClass).name?.startsWith("LocalClass") == true)
+
+                    // KTIJ-17870
+                    val type = node.getExpressionType()
+                    TestCase.assertTrue(type is PsiClassType)
+                    TestCase.assertTrue((type as PsiClassType).name.startsWith("LocalClass"))
+                    val resolvedFromType = type.resolve()
+                    TestCase.assertNotNull(resolvedFromType)
+                    TestCase.assertTrue(resolvedFromType is PsiClass)
+                    TestCase.assertTrue((resolvedFromType as PsiClass).name?.startsWith("LocalClass") == true)
+
+                    return super.visitCallExpression(node)
+                }
+            }
+        )
+    }
+
+    fun checkLocalResolve_function(myFixture: JavaCodeInsightTestFixture) {
         myFixture.configureByText(
             "MyClass.kt", """
             fun foo() {
@@ -2327,12 +2372,14 @@ interface UastResolveApiFixtureTestBase {
                     TestCase.assertEquals("mock", resolved!!.name)
                     if (first) {
                         TestCase.assertEquals("Mock", resolved.containingClass?.name)
+                        TestCase.assertFalse(resolved.hasModifier(JvmModifier.STATIC))
                         first = false
                     } else {
                         TestCase.assertEquals(
                             if (withJvmName) "Mocking" else "MockingKt",
                             resolved.containingClass?.name
                         )
+                        TestCase.assertTrue(resolved.hasModifier(JvmModifier.STATIC))
                     }
                     TestCase.assertNotNull(resolved.returnType)
                     TestCase.assertEquals("MyClass", resolved.returnType!!.canonicalText)

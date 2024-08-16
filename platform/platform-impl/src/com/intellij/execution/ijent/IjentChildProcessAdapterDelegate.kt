@@ -3,6 +3,7 @@ package com.intellij.execution.ijent
 
 import com.intellij.openapi.util.IntellijInternalApi
 import com.intellij.platform.ijent.*
+import com.intellij.platform.ijent.spi.IjentThreadPool
 import com.intellij.platform.util.coroutines.channel.ChannelInputStream
 import com.intellij.util.concurrency.annotations.RequiresBackgroundThread
 import kotlinx.coroutines.*
@@ -38,12 +39,12 @@ internal class IjentChildProcessAdapterDelegate(
         ijentChildProcess.stderr.consumeEach { chunk -> merged.send(chunk) }
       }
 
-      inputStream = ChannelInputStream(coroutineScope, merged)
+      inputStream = ChannelInputStream.forArrays(coroutineScope, merged)
       errorStream = ByteArrayInputStream(byteArrayOf())
     }
     else {
-      inputStream = ChannelInputStream(coroutineScope, ijentChildProcess.stdout)
-      errorStream = ChannelInputStream(coroutineScope, ijentChildProcess.stderr)
+      inputStream = ChannelInputStream.forArrays(coroutineScope, ijentChildProcess.stdout)
+      errorStream = ChannelInputStream.forArrays(coroutineScope, ijentChildProcess.stderr)
     }
   }
 
@@ -92,6 +93,7 @@ internal class IjentChildProcessAdapterDelegate(
   @Throws(InterruptedException::class)
   fun <T> runBlockingInContext(body: suspend () -> T): T =
     @Suppress("SSBasedInspection") runBlocking(coroutineScope.coroutineContext) {
+      IjentThreadPool.checkCurrentThreadIsInPool()
       body()
     }
 

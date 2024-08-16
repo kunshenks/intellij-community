@@ -44,6 +44,7 @@ private val PLATFORM_API_MODULES = java.util.List.of(
   "intellij.xml",
   "intellij.xml.psi",
   "intellij.xml.structureView",
+  "intellij.platform.kernel",
 )
 
 /**
@@ -79,7 +80,6 @@ private val PLATFORM_IMPLEMENTATION_MODULES = java.util.List.of(
   "intellij.platform.bootstrap",
 
   "intellij.relaxng",
-  "intellij.json",
   "intellij.spellchecker",
   "intellij.platform.webSymbols",
   "intellij.xml.dom.impl",
@@ -88,8 +88,6 @@ private val PLATFORM_IMPLEMENTATION_MODULES = java.util.List.of(
 
   "intellij.platform.markdown.utils",
   "intellij.platform.util.commonsLangV2Shim",
-
-  "intellij.platform.compose",
 
   // do we need it?
   "intellij.platform.sqlite",
@@ -340,7 +338,7 @@ internal fun computeProjectLibsUsedByPlugins(enabledPluginModules: Set<String>, 
 
     for (moduleName in plugin.includedModules.asSequence().map { it.moduleName }.distinct()) {
       val module = context.findRequiredModule(moduleName)
-      for (element in helper.getLibraryDependencies(module)) {
+      for (element in helper.getLibraryDependencies(module, withTests = false)) {
         val libRef = element.libraryReference
         if (libRef.parentReference is JpsModuleReference) {
           continue
@@ -399,7 +397,7 @@ private suspend fun computeImplicitRequiredModules(
   validateImplicitPlatformModule: Boolean,
 ): List<Pair<String, PersistentList<String>>> {
   val rootChain = persistentListOf<String>()
-  val rootList = layout.filteredIncludedModuleNames(TEST_FRAMEWORK_JAR, includeFromSubdirectories = false)
+  val rootList = layout.filteredIncludedModuleNames(excludedRelativeJarPath = TEST_FRAMEWORK_JAR, includeFromSubdirectories = false)
     .plus(explicit)
     .filter {
       !productLayout.excludedModuleNames.contains(it) &&
@@ -574,8 +572,9 @@ private fun toLoadPath(relativePath: String): String {
 }
 
 private fun getModuleDescriptor(moduleName: String, jpsModuleName: String, xIncludePathResolver: XIncludePathResolver, context: BuildContext): Element {
+  val forTests = (context as? BuildContextImpl)?.jarPackagerDependencyHelper?.isTestPluginModule(moduleName) ?: false
   val descriptorFile = "${moduleName.replace('/', '.')}.xml"
-  val file = requireNotNull(context.findFileInModuleSources(jpsModuleName, descriptorFile)) {
+  val file = requireNotNull(context.findFileInModuleSources(jpsModuleName, descriptorFile, forTests)) {
     "Cannot find file $descriptorFile in module $jpsModuleName"
   }
   val xml = JDOMUtil.load(file)

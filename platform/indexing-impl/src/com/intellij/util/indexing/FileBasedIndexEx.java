@@ -48,6 +48,7 @@ import java.util.function.IntPredicate;
 import static com.intellij.util.indexing.diagnostic.IndexLookupTimingsReporting.IndexOperationFusCollector.*;
 import static com.intellij.util.io.MeasurableIndexStore.keysCountApproximatelyIfPossible;
 
+@SuppressWarnings("TypeParameterHidesVisibleType")
 @ApiStatus.Internal
 public abstract class FileBasedIndexEx extends FileBasedIndex {
   public static final boolean TRACE_STUB_INDEX_UPDATES = SystemProperties.getBooleanProperty("idea.trace.stub.index.update", false) ||
@@ -78,7 +79,7 @@ public abstract class FileBasedIndexEx extends FileBasedIndex {
   }
 
   @ApiStatus.Internal
-  static boolean doTraceSharedIndexUpdates() {
+  public static boolean doTraceSharedIndexUpdates() {
     return TRACE_SHARED_INDEX_UPDATES;
   }
 

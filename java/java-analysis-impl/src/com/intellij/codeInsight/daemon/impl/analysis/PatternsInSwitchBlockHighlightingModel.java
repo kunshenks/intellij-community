@@ -743,6 +743,10 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
         IntentionAction fix = getFixFactory().createAddMissingBooleanPrimitiveBranchesFix(myBlock);
         if (fix != null) {
           completenessInfoForSwitch.registerFix(fix, null, null, null, null);
+          IntentionAction fixWithNull = getFixFactory().createAddMissingBooleanPrimitiveBranchesFixWithNull(myBlock);
+          if (fixWithNull != null) {
+            completenessInfoForSwitch.registerFix(fixWithNull, null, null, null, null);
+          }
         }
       }
       errorSink.accept(completenessInfoForSwitch);
@@ -868,6 +872,10 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
     Set<String> missingCases = ContainerUtil.map2LinkedSet(missedClasses, PsiClass::getQualifiedName);
     IntentionAction fix = getFixFactory().createAddMissingSealedClassBranchesFix(myBlock, missingCases, allNames);
     info.registerFix(fix, null, null, null, null);
+    IntentionAction fixWithNull = getFixFactory().createAddMissingSealedClassBranchesFixWithNull(myBlock, missingCases, allNames);
+    if (fixWithNull != null) {
+      info.registerFix(fixWithNull, null, null, null, null);
+    }
     return info;
   }
 
@@ -951,6 +959,7 @@ public class PatternsInSwitchBlockHighlightingModel extends SwitchBlockHighlight
     AtomicBoolean reported = new AtomicBoolean();
     if (switchModel instanceof PatternsInSwitchBlockHighlightingModel patternsInSwitchModel) {
       if (findUnconditionalPatternForType(labelElements, switchModel.mySelectorType) != null) return COMPLETE_WITH_UNCONDITIONAL;
+      if (switchModel.getSwitchSelectorKind() == SelectorKind.BOOLEAN && hasTrueAndFalse(labelElements))  return COMPLETE_WITH_UNCONDITIONAL;
       if (!needToCheckCompleteness && !isEnumSelector) return INCOMPLETE;
       //it is necessary,
       // because deconstruction patterns don't cover cases when some of their components are null and deconstructionPattern too

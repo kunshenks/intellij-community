@@ -6,16 +6,17 @@ if condition1:
             def foo(): ...
     else:
         if sys.version_info < (2, 2):
+            type Url = str
             pass
         elif sys.version_info < (2, 5):
-            pass
+            buz = []
         else:
             class MyClass:
                 if sys.version_info < (3, 12):
                     class MyNestedClass:
                         if sys.version_info >= (3, 11):
-                            pass
+                            def method(self): ...
                         else:
-                            pass
+                            s = "x"
                 else:
-                    pass
+                    i = 1

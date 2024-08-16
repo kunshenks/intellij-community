@@ -137,7 +137,7 @@
     <applicationService serviceImplementation="com.intellij.openapi.project.impl.shared.P3DynamicPluginSynchronizer"/>
 
     <ApplicationLoadListener implementation="com.intellij.openapi.project.impl.shared.P3SharedConfigFolderApplicationLoadListener"/>
-    <applicationInitializedListener implementation="com.intellij.openapi.project.impl.shared.P3SharedConfigFolderApplicationInitializedListener"/>
+    <applicationActivity implementation="com.intellij.openapi.project.impl.shared.ProcessPerProjectSharedConfigFolderApplicationInitializedListener"/>
 
     <!-- listen VFS_CHANGES - it is core service, so, don't want use lazy message bus listener without a reason -->
     <applicationService serviceInterface="com.intellij.openapi.command.undo.DocumentReferenceManager"
@@ -659,8 +659,6 @@
     <themeProvider id="JetBrainsHighContrastTheme" path="/themes/HighContrast.theme.json"/>
     <bundledColorScheme id="High contrast" path="themes/highContrastScheme.xml"/>
 
-    <iconMapper mappingFile="CrossModuleIcons.json"/>
-
     <themeMetadataProvider path="/themes/metadata/IntelliJPlatform.themeMetadata.json"/>
     <themeMetadataProvider path="/themes/metadata/JDK.themeMetadata.json"/>
 
@@ -919,7 +917,7 @@
                                            allowOnStartup="true"/>
     <statistics.applicationUsagesCollector implementation="com.intellij.internal.statistic.collectors.fus.settings.ProxySettingsCollector"/>
     <statistics.applicationUsagesCollector implementation="com.intellij.diff.statistics.DiffUsagesCollector"/>
-    <applicationInitializedListener implementation="com.intellij.openapi.application.ImportOldConfigsUsagesCollector$Trigger"/>
+    <applicationActivity implementation="com.intellij.openapi.application.ImportOldConfigsUsagesCollector$Trigger"/>
     <statistics.applicationUsagesCollector
       implementation="com.intellij.internal.statistic.collectors.fus.RegistryApplicationUsagesCollector"/>
     <statistics.projectUsagesCollector implementation="com.intellij.internal.statistic.collectors.fus.project.IndexableFilesCollector"/>
@@ -1035,6 +1033,16 @@
     <statistics.counterUsagesCollector implementationClass="com.intellij.openapi.project.ReadmeShownUsageCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.openapi.fileChooser.impl.FileChooserUsageCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.openapi.editor.markup.InspectionsFUS"/>
+    <statistics.applicationUsagesCollector implementation="com.intellij.internal.statistic.collectors.fus.build.BuildToolsCollector"/>
+
+    <fileTypeUsageSchemaDescriptor schema="DotBazelFile"
+                                   implementationClass="com.intellij.internal.statistic.collectors.fus.build.DotBazelFileTypeUsageSchemaDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="BazelBuildFile"
+                                   implementationClass="com.intellij.internal.statistic.collectors.fus.build.BazelBuildFileTypeUsageSchemaDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="BazelWorkspaceFile"
+                                   implementationClass="com.intellij.internal.statistic.collectors.fus.build.BazelWorkspaceFileTypeUsageSchemaDescriptor"/>
+    <fileTypeUsageSchemaDescriptor schema="BazelModuleFile"
+                                   implementationClass="com.intellij.internal.statistic.collectors.fus.build.BazelModuleFileTypeUsageSchemaDescriptor"/>
 
     <applicationService
       serviceImplementation="com.intellij.internal.statistic.eventLog.validator.storage.persistence.EventLogMetadataSettingsPersistence"
@@ -1054,7 +1062,7 @@
                 icon="AllIcons.Toolwindows.Notifications"
                 factoryClass="com.intellij.notification.impl.NotificationsToolWindowFactory"/>
 
-    <toolWindow id="Meet New UI" anchor="right" secondary="false" icon="com.intellij.icons.AllIcons.Toolwindows.MeetNewUi"
+    <toolWindow id="Meet New UI" anchor="right" secondary="false" icon="AllIcons.Toolwindows.MeetNewUi"
                 factoryClass="com.intellij.ide.ui.experimental.meetNewUi.MeetNewUiToolWindowFactory"/>
 
     <applicationService serviceInterface="com.intellij.ide.TypePresentationService"
@@ -1087,7 +1095,7 @@
                  defaultValue="true"
                  description="Enables Windows Defender configuration check on project open"/>
 
-    <applicationInitializedListener implementation="com.intellij.codeInsight.editorActions.TypedHandlerPreloader"/>
+    <applicationActivity implementation="com.intellij.codeInsight.editorActions.TypedHandlerPreloader"/>
     <actionConfigurationCustomizer implementation="com.intellij.execution.ExecutorRegistryImpl$ExecutorRegistryActionConfigurationTuner"/>
 
     <writingAccessProvider implementation="com.intellij.openapi.fileEditor.impl.NonProjectFileWritingAccessProvider" order="first"/>
@@ -1283,10 +1291,6 @@
     <generalTroubleInfoCollector implementation="com.intellij.ide.troubleshooting.GCTroubleInfoCollector"/>
 
     <!-- experiments -->
-    <experimentalFeature id="wsl.legacy.distribution" percentOfUsers="0">
-      <description>Makes legacy Ubuntu distribution (bash.exe) available</description>
-    </experimentalFeature>
-
     <experimentalFeature id="linux.native.menu" percentOfUsers="100" requireRestart="true">
       <description>Integration with global menu in Linux</description>
     </experimentalFeature>
@@ -1446,7 +1450,7 @@
     <titleInfoProvider implementation="com.intellij.openapi.wm.impl.simpleTitleParts.SuperUserSuffixTitleInfoProvider"/>
     <titleInfoProvider implementation="com.intellij.openapi.wm.impl.simpleTitleParts.ConfigFolderTitleInfoProvider"/>
 
-    <applicationInitializedListener implementation="com.intellij.ide.plugins.DynamicPluginVfsListenerInitializer"/>
+    <applicationActivity implementation="com.intellij.ide.plugins.DynamicPluginVfsListenerInitializer"/>
     <vfs.asyncListener implementation="com.intellij.ide.plugins.DynamicPluginVfsListener"/>
 
     <intentionMenuContributor implementation="com.intellij.refactoring.suggested.SuggestedRefactoringIntentionContributor"/>
@@ -1656,9 +1660,6 @@
     <advancedSetting id="enable.combined.diff" default="false" bundle="messages.DiffBundle" groupKey="advanced.settings.vcs"/>
 
     <recoveryAction implementation="com.intellij.ide.actions.cache.InvalidateCachesAndRestartAction"/>
-    <recoveryAction implementation="com.intellij.ide.actions.cache.RecoverVfsFromLogRecoveryAction"/>
-    <registryKey description="Suggest cache recovery on caches corruption" key="idea.vfs.log-vfs-operations.suggest-automatic-recovery"
-                 defaultValue="true"/>
 
     <applicationService serviceInterface="com.intellij.openapi.application.CoroutineSupport"
                         serviceImplementation="com.intellij.openapi.application.impl.PlatformCoroutineSupport"/>
@@ -1681,6 +1682,9 @@
 
     <applicationService serviceInterface="com.intellij.ui.jcef.JBCefOSRHandlerFactory"
                         serviceImplementation="com.intellij.ui.jcef.JBCefOSRHandlerFactoryImpl"/>
+
+    <applicationService serviceInterface="com.intellij.ui.jcef.CefOsrBrowserFactory"
+                        serviceImplementation="com.intellij.ui.jcef.CefBrowserFactoryImpl"/>
 
     <projectService serviceInterface="com.intellij.internal.performanceTests.ProjectInitializationDiagnosticService"
                     serviceImplementation="com.intellij.internal.performanceTests.DummyProjectInitializationDiagnosticService"/>
@@ -1721,8 +1725,8 @@
 
     <backgroundPostStartupActivity implementation="com.intellij.diagnostic.opentelemetry.JVMStatsToOTelReporter"/>
 
-    <applicationInitializedListener implementation="com.intellij.openapi.vfs.newvfs.persistent.VFSHealthCheckServiceStarter"/>
-    <applicationInitializedListener implementation="com.intellij.diagnostic.JVMResponsivenessMonitorStarter"/>
+    <applicationActivity implementation="com.intellij.openapi.vfs.newvfs.persistent.VFSHealthCheckServiceStarter"/>
+    <applicationActivity implementation="com.intellij.diagnostic.JVMResponsivenessMonitorStarter"/>
 
     <backgroundPostStartupActivity implementation="com.intellij.openapi.vfs.newvfs.monitoring.VFSInitializationConditionsToFusReporter"/>
 
@@ -1739,10 +1743,6 @@
     <registryKey key="search.everywhere.preview"
                  defaultValue="true"
                  description="Enables preview of the selected element in the Search Everywhere"/>
-
-    <registryKey key="search.everywhere.preview.default"
-                 defaultValue="false"
-                 description="Show preview of the selected element in the Search Everywhere by default"/>
 
     <registryKey key="search.everywhere.recents"
                  defaultValue="true"
@@ -1828,7 +1828,7 @@
 
     <postStartupActivity implementation="com.intellij.execution.wsl.ijent.nio.toggle.IjentInProjectStarter"
                          os="windows"/>
-    <applicationInitializedListener implementation="com.intellij.ide.SwingTooltipManagerCustomizer"/>
+    <applicationActivity implementation="com.intellij.ide.SwingTooltipManagerCustomizer"/>
   </extensions>
 
   <applicationListeners>
@@ -1885,6 +1885,7 @@
               topic="com.intellij.ide.ui.UISettingsListener"/>
     <listener class="com.intellij.ui.MacCustomAppIconStartupService" topic="com.intellij.ide.AppLifecycleListener"/>
     <listener class="com.intellij.openapi.editor.actions.ResetFontSizeAppInitListener" topic="com.intellij.ide.AppLifecycleListener"/>
+    <listener class="com.intellij.openapi.wm.impl.WindowButtonsAppLifecycleListener" topic="com.intellij.ide.AppLifecycleListener" os="linux"/>
 
     <listener class="com.intellij.ide.ui.laf.LafAndEditorColorSchemeDynamicPluginListener"
               topic="com.intellij.ide.plugins.DynamicPluginListener"/>

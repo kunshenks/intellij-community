@@ -1,18 +1,21 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.intellij.build
 
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
+import org.jetbrains.intellij.build.telemetry.useWithScope
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.api.trace.SpanBuilder
 import kotlinx.collections.immutable.PersistentMap
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.Serializable
+import org.jetbrains.intellij.build.io.DEFAULT_TIMEOUT
 import org.jetbrains.intellij.build.productRunner.IntellijProductRunner
 import org.jetbrains.jps.model.module.JpsModule
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.time.Duration
 
 interface BuildContext : CompilationContext {
   val productProperties: ProductProperties
@@ -144,17 +147,40 @@ interface BuildContext : CompilationContext {
   suspend fun cleanupJarCache()
 
   suspend fun createProductRunner(additionalPluginModules: List<String> = emptyList()): IntellijProductRunner
+
+  suspend fun runProcess(
+    vararg args: String,
+    workingDir: Path? = null,
+    timeout: Duration = DEFAULT_TIMEOUT,
+    additionalEnvVariables: Map<String, String> = emptyMap(),
+    attachStdOutToException: Boolean = false,
+  )
 }
 
 suspend inline fun <T> BuildContext.executeStep(spanBuilder: SpanBuilder,
                                                 stepId: String,
                                                 crossinline step: suspend CoroutineScope.(Span) -> T): T? {
-  if (isStepSkipped(stepId)) {
-    spanBuilder.startSpan().addEvent("skip '$stepId' step").end()
-    return null
-  }
-  else {
-    return spanBuilder.useWithScope(Dispatchers.IO, step)
+  return spanBuilder.useWithScope(Dispatchers.IO) { span ->
+    try {
+      options.buildStepListener.onStart(stepId, messages)
+      if (isStepSkipped(stepId)) {
+        span.addEvent("skip '$stepId' step")
+        options.buildStepListener.onSkipping(stepId, messages)
+        null
+      }
+      else {
+        coroutineScope {
+          step(span)
+        }
+      }
+    }
+    catch (failure: Throwable) {
+      options.buildStepListener.onFailure(stepId, failure, messages)
+      null
+    }
+    finally {
+      options.buildStepListener.onCompletion(stepId, messages)
+    }
   }
 }
 

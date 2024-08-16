@@ -4,6 +4,7 @@ package com.intellij.codeInsight.inline.completion
 import com.intellij.codeInsight.inline.completion.elements.InlineCompletionElement
 import com.intellij.codeInsight.inline.completion.listeners.InlineCompletionTypingTracker
 import com.intellij.codeInsight.inline.completion.listeners.InlineSessionWiseCaretListener
+import com.intellij.codeInsight.inline.completion.logs.InlineCompletionLogs
 import com.intellij.codeInsight.inline.completion.logs.InlineCompletionUsageTracker
 import com.intellij.codeInsight.inline.completion.logs.InlineCompletionUsageTracker.ShownEvents.FinishType
 import com.intellij.codeInsight.inline.completion.session.InlineCompletionContext
@@ -17,6 +18,8 @@ import com.intellij.codeInsight.inline.completion.utils.SafeInlineCompletionExec
 import com.intellij.codeInsight.lookup.LookupManager
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.application.readAction
 import com.intellij.openapi.diagnostic.thisLogger
 import com.intellij.openapi.editor.Document
@@ -62,7 +65,8 @@ class InlineCompletionHandler(
   private val completionState = InlineCompletionState()
 
   init {
-    addEventListener(InlineCompletionUsageTracker.Listener())
+    addEventListener(InlineCompletionUsageTracker.Listener()) // todo remove
+    addEventListener(InlineCompletionLogs.Listener(editor))
     InlineCompletionOnboardingListener.createIfOnboarding(editor)?.let(::addEventListener)
   }
 
@@ -418,7 +422,7 @@ class InlineCompletionHandler(
               .collect { (elementIndex, element) ->
                 ensureActive()
                 trace(InlineCompletionEventType.Computed(variantIndex, element, elementIndex))
-                coroutineToIndicator { elementComputed(variantIndex, elementIndex, element) }
+                coroutineToIndicator { WriteIntentReadAction.run<Nothing?> { elementComputed(variantIndex, elementIndex, element) } }
                 allVariantsEmpty.set(false)
               }
           }

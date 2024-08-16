@@ -18,6 +18,7 @@ import com.intellij.openapi.util.NlsSafe
 import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.util.io.FileUtil
 import com.intellij.platform.ide.progress.withBackgroundProgress
+import com.intellij.util.SystemProperties
 import com.jetbrains.python.PyBundle
 import com.jetbrains.python.packaging.PyExecutionException
 import com.jetbrains.python.packaging.PyPackageManager
@@ -59,7 +60,7 @@ internal fun detectPoetryExecutable(): Path? {
     SystemInfo.isWindows -> "poetry.bat"
     else -> "poetry"
   }
-  return PathEnvironmentVariableUtil.findInPath(name)?.toPath() ?: System.getProperty("user.home")?.let { homePath ->
+  return PathEnvironmentVariableUtil.findInPath(name)?.toPath() ?: SystemProperties.getUserHome().let { homePath ->
     Path.of(homePath, ".poetry", "bin", name).takeIf { it.exists() }
   }
 }
@@ -179,16 +180,6 @@ private fun getPoetryEnvs(projectPath: Path): List<String> =
     result.lineSequence().map { it.split(" ")[0] }.filterNot { it.isEmpty() }.toList()
   }
 
-internal fun isVirtualEnvsInProject(projectPath: Path): Boolean? =
-  if (projectPath.exists()) {
-    syncRunPoetry(projectPath, "config", "virtualenvs.in-project", defaultResult = null) {
-      it.trim() == "true"
-    }
-  }
-  else {
-    false
-  }
-
 internal val poetryVersion: String?
   get() = syncRunPoetry(null, "--version", defaultResult = "") {
     it.split(' ').lastOrNull()
@@ -219,4 +210,4 @@ inline fun <reified T> syncRunPoetry(
   }
 }
 
-fun getPythonExecutable(homePath: String): String = PythonSdkUtil.getPythonExecutable(homePath) ?: FileUtil.join(homePath, "bin", "python")
+fun getPythonExecutable(homePath: String): String =  VirtualEnvReader.Instance.findPythonInPythonRoot(Path.of(homePath))?.toString() ?: FileUtil.join(homePath, "bin", "python")

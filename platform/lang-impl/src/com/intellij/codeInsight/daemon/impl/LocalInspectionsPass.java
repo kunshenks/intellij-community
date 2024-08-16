@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeHighlighting.HighlightDisplayLevel;
@@ -26,9 +26,13 @@ import com.intellij.openapi.editor.markup.TextAttributes;
 import com.intellij.openapi.editor.markup.UnmodifiableTextAttributes;
 import com.intellij.openapi.progress.ProgressIndicator;
 import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.project.PossiblyDumbAware;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectTypeService;
-import com.intellij.openapi.util.*;
+import com.intellij.openapi.util.NlsContexts;
+import com.intellij.openapi.util.NlsSafe;
+import com.intellij.openapi.util.Pair;
+import com.intellij.openapi.util.TextRange;
 import com.intellij.openapi.util.registry.Registry;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.profile.codeInspection.ProjectInspectionProfileManager;
@@ -50,7 +54,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass {
+final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass implements PossiblyDumbAware {
   private static final Logger LOG = Logger.getInstance(LocalInspectionsPass.class);
   private final TextRange myPriorityRange;
   private final boolean myIgnoreSuppressed;
@@ -95,8 +99,28 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
       List<? extends InspectionRunner.InspectionContext> resultContexts = List.of();
       List<PsiFile> injectedFragments = List.of();
     };
-    if (!toolWrappers.isEmpty()) {
-      Consumer<? super HighlighterRecyclerPickup> withRecycler = invalidPsiRecycler -> {
+
+    // In dumb mode, we need to run dumb-aware inspections only.
+    // But we need to keep highlights from currently enabled but inactive smart-only inspections.
+    List<? extends LocalInspectionToolWrapper> activeToolWrappers;
+    List<? extends LocalInspectionToolWrapper> disabledSmartOnlyToolWrappers;
+    if (isDumbMode()) {
+      activeToolWrappers = toolWrappers.stream().parallel().filter(wrapper -> wrapper.isDumbAware()).toList();
+
+      if (activeToolWrappers.isEmpty()) {
+        disabledSmartOnlyToolWrappers = toolWrappers;
+      }
+      else {
+        disabledSmartOnlyToolWrappers = ContainerUtil.filter(toolWrappers, wrapper -> !wrapper.isDumbAware());
+      }
+    }
+    else {
+      activeToolWrappers = toolWrappers;
+      disabledSmartOnlyToolWrappers = List.of();
+    }
+
+    if (!activeToolWrappers.isEmpty()) {
+      Consumer<? super ManagedHighlighterRecycler> withRecycler = invalidPsiRecycler -> {
         InspectionRunner.ApplyIncrementallyCallback applyIncrementallyCallback = (descriptors, holder, visitingPsiElement, shortName) -> {
           List<HighlightInfo> allInfos = descriptors.isEmpty() ? null : new ArrayList<>(descriptors.size());
           for (ProblemDescriptor descriptor : descriptors) {
@@ -134,10 +158,11 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
                       infos + "; " + context.elementsInside().size() + "/" + context.elementsOutside().size()+" elements");
           }
         };
-        InspectionRunner runner =
-          new InspectionRunner(getFile(), myRestrictRange, myPriorityRange, myInspectInjectedPsi, true, progress, myIgnoreSuppressed,
-                               myProfileWrapper, mySuppressedElements);
-        result.resultContexts = runner.inspect(toolWrappers,
+
+        InspectionRunner runner = new InspectionRunner(getFile(), myRestrictRange, myPriorityRange, myInspectInjectedPsi, true,
+                                                       isDumbMode(), progress, myIgnoreSuppressed, myProfileWrapper, mySuppressedElements);
+
+        result.resultContexts = runner.inspect(activeToolWrappers,
                                         ((HighlightingSessionImpl)getHighlightingSession()).getMinimumSeverity(),
                                         true,
                                         applyIncrementallyCallback,
@@ -147,15 +172,15 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
         result.injectedFragments = runner.getInjectedFragments();
       };
       if (myHighlightInfoUpdater instanceof HighlightInfoUpdaterImpl impl) {
-        impl.runWithInvalidPsiRecycler(getHighlightingSession(), toolId -> HighlightInfoUpdaterImpl.isInspectionToolId(toolId), withRecycler);
+        impl.runWithInvalidPsiRecycler(getHighlightingSession(), HighlightInfoUpdaterImpl.WhatTool.INSPECTION, withRecycler);
       }
       else {
-        withRecycler.accept(HighlighterRecyclerPickup.EMPTY);
+        ManagedHighlighterRecycler.runWithRecycler(getHighlightingSession(), withRecycler);
       }
     }
     if (myHighlightInfoUpdater instanceof HighlightInfoUpdaterImpl impl) {
       Set<Pair<Object, PsiFile>> pairs = ContainerUtil.map2Set(result.resultContexts, context -> Pair.create(context.tool().getShortName(), context.psiFile()));
-      impl.removeHighlightsForObsoleteTools(getFile(), getDocument(), result.injectedFragments, pairs, getHighlightingSession());
+      impl.removeHighlightsForObsoleteTools(getFile(), getDocument(), result.injectedFragments, pairs, getHighlightingSession(), disabledSmartOnlyToolWrappers);
       impl.removeWarningsInsideErrors(result.injectedFragments, getDocument(), getHighlightingSession());  // must be the last
     }
   }
@@ -183,7 +208,7 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
     HighlightSeverity severity = highlightInfoType.getSeverity(psiElement);
     TextAttributesKey attributesKey = ((ProblemDescriptorBase)problemDescriptor).getEnforcedTextAttributes();
     if (problemDescriptor.getHighlightType() == ProblemHighlightType.GENERIC_ERROR_OR_WARNING && attributesKey == null) {
-      attributesKey = myProfileWrapper.getInspectionProfile().getEditorAttributes(key.toString(), getFile());
+      attributesKey = myProfileWrapper.getInspectionProfile().getEditorAttributes(key.getShortName(), getFile());
     }
     TextAttributes attributes = attributesKey == null || editorColorsScheme == null || severity.getName().equals(attributesKey.getExternalName())
                                 ? severityRegistrar.getTextAttributesBySeverity(severity)
@@ -406,7 +431,7 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
     if (((ProblemDescriptorBase)descriptor).getEnforcedTextAttributes() != null) {
       needEmptyAction = false;
     }
-    if (needEmptyAction && emptyActionRegistered.add(Pair.create(((ProblemDescriptorBase)descriptor).getTextRange(), key.toString()))) {
+    if (needEmptyAction && emptyActionRegistered.add(Pair.create(((ProblemDescriptorBase)descriptor).getTextRange(), key.getShortName()))) {
       String displayNameByKey = HighlightDisplayKey.getDisplayNameByKey(key);
       LOG.assertTrue(displayNameByKey != null, key.toString());
 
@@ -417,8 +442,7 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
     return result;
   }
 
-  @NotNull
-  private List<LocalInspectionToolWrapper> getInspectionTools(@NotNull InspectionProfileWrapper profile) {
+  private @NotNull List<LocalInspectionToolWrapper> getInspectionTools(@NotNull InspectionProfileWrapper profile) {
     List<InspectionToolWrapper<?, ?>> toolWrappers = profile.getInspectionProfile().getInspectionTools(getFile());
 
     if (LOG.isDebugEnabled()) {
@@ -466,6 +490,11 @@ final class LocalInspectionsPass extends ProgressableTextEditorHighlightingPass 
   @Override
   public @NotNull List<HighlightInfo> getInfos() {
     return Collections.unmodifiableList(myInfos);
+  }
+
+  @Override
+  public boolean isDumbAware() {
+    return Registry.is("ide.dumb.aware.inspections");
   }
 
   private static final class InspectionHighlightInfoType extends HighlightInfoType.HighlightInfoTypeImpl {

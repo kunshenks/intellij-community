@@ -16,7 +16,10 @@ import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.actionSystem.impl.FusAwareAction
 import com.intellij.openapi.actionSystem.impl.Utils
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.application.WriteIntentReadAction
 import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.keymap.Keymap
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.IncompleteDependenciesService
@@ -26,10 +29,12 @@ import com.intellij.psi.PsiDocumentManager
 import com.intellij.util.TimeoutUtil
 import it.unimi.dsi.fastutil.objects.Object2LongMaps
 import it.unimi.dsi.fastutil.objects.Object2LongOpenHashMap
+import org.jetbrains.annotations.ApiStatus
 import java.awt.event.InputEvent
 import java.lang.ref.WeakReference
 import java.util.*
 
+@ApiStatus.Internal
 class ActionsCollectorImpl : ActionsCollector() {
   private data class ActionUpdateStatsKey(val actionId: String, val language: String)
 
@@ -201,20 +206,22 @@ class ActionsCollectorImpl : ActionsCollector() {
     }
 
     private fun projectData(project: Project?): List<EventPair<*>> {
-      val isDumb = project
-        ?.takeIf { !project.isDisposed }
-        ?.let { DumbService.isDumb(project) }
-      val incompleteDependenciesMode = project
-        ?.takeIf { !project.isDisposed }
-        ?.getServiceIfCreated(IncompleteDependenciesService::class.java)
-        ?.getState()
+      return ReadAction.compute<List<EventPair<*>>, Nothing> {
+        val isDumb = project
+          ?.takeIf { !project.isDisposed }
+          ?.let { DumbService.isDumb(project) }
+        val incompleteDependenciesMode = project
+          ?.takeIf { !project.isDisposed }
+          ?.getServiceIfCreated(IncompleteDependenciesService::class.java)
+          ?.getState()
 
-      return buildList {
-        if (isDumb != null) {
-          add(ActionsEventLogGroup.DUMB.with(isDumb))
-        }
-        if (incompleteDependenciesMode != null) {
-          add(ActionsEventLogGroup.INCOMPLETE_DEPENDENCIES_MODE.with(incompleteDependenciesMode))
+        return@compute buildList {
+          if (isDumb != null) {
+            add(ActionsEventLogGroup.DUMB.with(isDumb))
+          }
+          if (incompleteDependenciesMode != null) {
+            add(ActionsEventLogGroup.INCOMPLETE_DEPENDENCIES_MODE.with(incompleteDependenciesMode))
+          }
         }
       }
     }

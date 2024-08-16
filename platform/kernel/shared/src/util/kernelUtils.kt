@@ -1,36 +1,39 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.platform.kernel.util
 
+import com.intellij.ide.plugins.PluginUtil
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.application.asContextElement
-import com.intellij.util.concurrency.annotations.RequiresEdt
 import com.jetbrains.rhizomedb.*
 import com.jetbrains.rhizomedb.impl.collectEntityClasses
-import fleet.kernel.Kernel
-import fleet.kernel.KernelMiddleware
-import fleet.kernel.kernel
+import fleet.kernel.*
 import fleet.kernel.rebase.*
+import fleet.kernel.rete.Rete
 import fleet.kernel.rete.withRete
-import fleet.kernel.subscribe
 import fleet.rpc.core.Serialization
 import fleet.util.async.conflateReduce
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.modules.SerializersModule
-import org.jetbrains.annotations.ApiStatus
-import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
-@ApiStatus.Internal
-@ApiStatus.Experimental
-suspend fun <T> withKernel(middleware: KernelMiddleware, body: suspend () -> T) {
-  val entityClasses = listOf(Kernel::class.java.classLoader).flatMap(::collectEntityClasses)
+suspend fun <T> withKernel(middleware: KernelMiddleware, body: suspend CoroutineScope.() -> T) {
+  val entityClasses = listOf(Kernel::class.java.classLoader).flatMap {
+    collectEntityClasses(it, PluginUtil.getPluginId(it).idString)
+  }
   fleet.kernel.withKernel(entityClasses, middleware = middleware) { currentKernel ->
     withRete {
       body()
     }
   }
+}
+
+fun CoroutineContext.kernelCoroutineContext(): CoroutineContext {
+  return kernel + this[Rete]!! + this[DbSource.ContextElement]!!
 }
 
 val CommonInstructionSet: InstructionSet =
@@ -49,7 +52,6 @@ val CommonInstructionSet: InstructionSet =
 
 object ReadTracker {
   private val readTrackingIndex = ReadTrackingIndex()
-  private val lambdaCounter = AtomicInteger()
   suspend fun subscribeForChanges() {
     kernel().subscribe(Channel.UNLIMITED) { initial, changes ->
       changes
@@ -69,7 +71,7 @@ object ReadTracker {
                   readTrackingIndex.runLambda(it)
                 }
               }
-              DbContext.set(db)
+              DbContext.threadLocal.set(DbContext<DB>(db, null))
             }
           }
           catch (e: Throwable) {
@@ -77,26 +79,8 @@ object ReadTracker {
         }
     }
   }
-
-  @RequiresEdt
-  fun forget(id: Int) {
-    readTrackingIndex.forget(id)
-  }
-
-  /**
-   * returns id of registered lambda, it should be passed to forget on disposing
-   */
-  @RequiresEdt
-  fun reactive(f: () -> Unit): Int {
-    val id = lambdaCounter.incrementAndGet()
-    val lambdaInfo = ReadTrackingIndex.LambdaInfo(id, f)
-    asOf(DbContext.threadBound.impl.withReadTrackingContext(readTrackingIndex)) {
-      readTrackingIndex.runLambda(lambdaInfo)
-    }
-    return id;
-  }
 }
 
-val KernelRpcSerialization = Serialization(SerializersModule {
+val KernelRpcSerialization = Serialization(lazyOf(SerializersModule {
   registerCRUDInstructions()
-})
+}))

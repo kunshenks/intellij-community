@@ -25,6 +25,7 @@ abstract class HighlightInfoUpdater {
    *               {@code String}: the tool is a {@link LocalInspectionTool} with its {@link LocalInspectionTool#getShortName()}==toolId
    *               {@code Class<? extends Annotator>}: the tool is an {@link com.intellij.lang.annotation.Annotator} of the corresponding class
    *               {@code Class<? extends HighlightVisitor>}: the tool is a {@link HighlightVisitor} of the corresponding class
+   *               {@code Object: Injection background and syntax from InjectedGeneralHighlightingPass#INJECTION_BACKGROUND_ID }
    */
   abstract void psiElementVisited(@NotNull Object toolId,
                                   @NotNull PsiElement visitedPsiElement,
@@ -33,7 +34,7 @@ abstract class HighlightInfoUpdater {
                                   @NotNull PsiFile psiFile,
                                   @NotNull Project project,
                                   @NotNull HighlightingSession session,
-                                  @NotNull HighlighterRecyclerPickup invalidElementRecycler);
+                                  @NotNull ManagedHighlighterRecycler invalidElementRecycler);
 
   abstract void removeInfosForInjectedFilesOtherThan(@NotNull PsiFile hostPsiFile,
                                                      @NotNull TextRange restrictRange,
@@ -60,7 +61,7 @@ abstract class HighlightInfoUpdater {
                            @NotNull PsiFile psiFile,
                            @NotNull Project project,
                            @NotNull HighlightingSession session,
-                           @NotNull HighlighterRecyclerPickup invalidElementRecycler) {
+                           @NotNull ManagedHighlighterRecycler invalidElementRecycler) {
     }
   };
 }

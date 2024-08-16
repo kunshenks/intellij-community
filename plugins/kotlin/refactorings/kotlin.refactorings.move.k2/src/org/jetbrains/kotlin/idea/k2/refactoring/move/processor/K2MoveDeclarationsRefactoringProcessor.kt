@@ -16,7 +16,7 @@ import org.jetbrains.kotlin.analysis.api.permissions.allowAnalysisOnEdt
 import org.jetbrains.kotlin.idea.base.psi.deleteSingle
 import org.jetbrains.kotlin.idea.base.resources.KotlinBundle
 import org.jetbrains.kotlin.idea.k2.refactoring.move.descriptor.K2MoveOperationDescriptor
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.unMarkNonUpdatableUsages
+import org.jetbrains.kotlin.psi.KtFile
 
 class K2MoveDeclarationsRefactoringProcessor(
     private val operationDescriptor: K2MoveOperationDescriptor.Declarations
@@ -57,20 +57,16 @@ class K2MoveDeclarationsRefactoringProcessor(
                 }
             }
         }
-        val toContinue = showConflicts(conflicts, usages)
-        if (!toContinue) return false
-        unMarkNonUpdatableUsages(operationDescriptor.sourceElements)
-        refUsages.set(K2MoveRenameUsageInfo.filterUpdatable(operationDescriptor.sourceElements, usages).toTypedArray())
-        return true
+        return showConflicts(conflicts, usages)
     }
 
     @OptIn(KaAllowAnalysisOnEdt::class)
     override fun performRefactoring(usages: Array<out UsageInfo>) {
         allowAnalysisOnEdt {
             operationDescriptor.moveDescriptors.forEach { moveDescriptor ->
-                val elementsToMove = moveDescriptor.source.elements
+                val elementsToMove = moveDescriptor.source.elements.withContext()
                 val targetFile = moveDescriptor.target.getOrCreateTarget(operationDescriptor.dirStructureMatchesPkg)
-                val sourceFiles = elementsToMove.map { it.containingKtFile }.distinct()
+                val sourceFiles = elementsToMove.map { it.containingFile as KtFile }.distinct()
                 val oldToNewMap = elementsToMove.moveInto(targetFile)
                 moveDescriptor.source.elements.forEach(PsiElement::deleteSingle)
                 @Suppress("UNCHECKED_CAST")

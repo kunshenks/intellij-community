@@ -71,9 +71,12 @@ from _pydev_imps._pydev_saved_modules import threading
 from _pydev_imps._pydev_saved_modules import time
 from _pydev_imps._pydev_saved_modules import socket
 from socket import socket, AF_INET, SOCK_STREAM, SHUT_RD, SHUT_WR, SOL_SOCKET, SO_REUSEADDR, SHUT_RDWR, timeout
-from _pydevd_bundle.pydevd_constants import DebugInfoHolder, get_thread_id, IS_JYTHON, IS_PY2, IS_PY3K, \
-    IS_PY36_OR_GREATER, STATE_RUN, dict_keys, ASYNC_EVAL_TIMEOUT_SEC, IS_IRONPYTHON, GlobalDebuggerHolder, \
-    get_global_debugger, GetGlobalDebugger, set_global_debugger, NEXT_VALUE_SEPARATOR
+from _pydevd_bundle.pydevd_constants import DebugInfoHolder, get_thread_id, IS_JYTHON, \
+    IS_PY2, IS_PY3K, \
+    IS_PY36_OR_GREATER, STATE_RUN, dict_keys, ASYNC_EVAL_TIMEOUT_SEC, IS_IRONPYTHON, \
+    GlobalDebuggerHolder, \
+    get_global_debugger, GetGlobalDebugger, set_global_debugger, NEXT_VALUE_SEPARATOR, \
+    SINGLE_PORT_MODE
 from _pydev_bundle.pydev_override import overrides
 import json
 import weakref
@@ -415,10 +418,15 @@ def start_server(port):
         s.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
     s.bind(('', port))
-    pydevd_log(1, "Bound to port ", str(port))
+    effective_port = s.getsockname()[1]
+    pydevd_log(1, "Bound to port ", str(effective_port))
 
     try:
         s.listen(1)
+        if SINGLE_PORT_MODE:
+            # Output the effective port number to stdout, allowing a client to read
+            # and connect to it.
+            sys.stdout.write("Waiting connection on port %s...\n" % effective_port)
         newSock, _addr = s.accept()
         pydevd_log(1, "Connection accepted")
         # closing server socket is not necessary but we don't need it
@@ -427,7 +435,7 @@ def start_server(port):
         return newSock
 
     except:
-        sys.stderr.write("Could not bind to port: %s\n" % (port,))
+        sys.stderr.write("Could not bind to port: %s\n" % (effective_port,))
         sys.stderr.flush()
         traceback.print_exc()
 
@@ -1376,7 +1384,7 @@ class InternalDataViewerAction(InternalThreadCommand):
 #=======================================================================================================================
 class InternalTableCommand(InternalThreadCommand):
     def __init__(self, sequence, thread_id, frame_id, init_command, command_type,
-                 start_index, end_index):
+                 start_index, end_index, format):
         super().__init__(thread_id)
         self.sequence = sequence
         self.frame_id = frame_id
@@ -1384,6 +1392,7 @@ class InternalTableCommand(InternalThreadCommand):
         self.command_type = command_type
         self.start_index = start_index
         self.end_index = end_index
+        self.format = format
 
     def do_it(self, dbg):
         try:
@@ -1401,7 +1410,8 @@ class InternalTableCommand(InternalThreadCommand):
             dbg.writer.add_command(cmd)
 
     def exec_command(self, frame):
-        return exec_table_command(self.init_command, self.command_type, self.start_index, self.end_index,
+        return exec_table_command(self.init_command, self.command_type,
+                                  self.start_index, self.end_index, self.format,
                                   frame.f_globals, frame.f_locals)
 
 

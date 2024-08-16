@@ -123,9 +123,9 @@ function updatePopup(sessionDiv) {
   prefixDiv.setAttribute("style", "background-color: lightgrey;")
   const codeElement = document.querySelector('.code');
   if ("aia_user_prompt" in lookup["additionalInfo"]) {
-    prefixDiv.innerHTML = `user prompt: &quot;${lookup["additionalInfo"]["aia_user_prompt"]}&quot;; latency: ${lookup["latency"]}`
+    prefixDiv.textContent = `user prompt: "${lookup["additionalInfo"]["aia_user_prompt"]}"; latency: ${lookup["latency"]}`
   } else {
-    prefixDiv.innerHTML = `prefix: &quot;${lookup["prefix"]}&quot;; latency: ${lookup["latency"]}`
+    prefixDiv.textContent = `prefix: "${lookup["prefix"]}"; latency: ${lookup["latency"]}`
   }
   popup.appendChild(prefixDiv)
   // order: () -> (suggestions or diffView) -> features -> contexts
@@ -136,7 +136,7 @@ function updatePopup(sessionDiv) {
   if (needAddFeatures) {
     addCommonFeatures(sessionDiv, popup, lookup)
   }
-  else if (needAddContext && !isCodeGeneration) {
+  else if (needAddContext && "cc_context" in lookup["additionalInfo"]) {
     addContexts(sessionDiv, popup, lookup)
   }
   else {
@@ -235,10 +235,12 @@ function addContexts(sessionDiv, popup, lookup) {
   const contextJson = lookup["additionalInfo"]["cc_context"]
   addButtonToCopyCompletionContext(contextJson, sessionDiv, popup, lookup)
 
-  const contextObject = JSON.parse(contextJson)
-  contextObject.contexts.items.forEach(context => {
-    popup.appendChild(createContextBlock(context))
-  })
+  if (contextJson !== "") {
+    const contextObject = JSON.parse(contextJson)
+    contextObject.context.forEach(item => {
+      popup.appendChild(createContextBlock(item))
+    })
+  }
 }
 
 function createContextBlock(context) {
@@ -303,7 +305,7 @@ function addAiaDiagnosticsBlock(description, field, popup, lookup) {
   let contextBlock = document.createElement("DIV")
   contextBlock.style.whiteSpace = "inherit"
   let code = document.createElement("code")
-  code.innerHTML = `${description}:\n\n${lookup["additionalInfo"][field]}`
+  code.textContent = `${description}:\n\n${lookup["additionalInfo"][field]}`
   contextBlock.appendChild(code)
   code.style.whiteSpace = "inherit"
   popup.appendChild(contextBlock)
@@ -415,9 +417,15 @@ function updateElementFeatures(suggestionDiv) {
   }
   const parts = suggestionDiv.id.split(" ")
   const sessionId = parts[0]
-  if (!(sessionId in features)) return
   const lookupOrder = parts[1]
   const suggestionIndex = parts[2]
+
+  if (suggestionDiv.parentElement?.parentElement?.classList.contains("chat")) {
+    addFunctionCallingDiagnostics(suggestionDiv, sessions[sessionId]?._lookups[lookupOrder]?.suggestions[suggestionIndex])
+    return;
+  }
+
+  if (!(sessionId in features)) return
   const featuresJson = JSON.parse(pako.ungzip(atob(features[sessionId]), {to: 'string'}))
   const lookupFeatures = featuresJson[lookupOrder]
   if (lookupFeatures["element"].length <= suggestionIndex) return

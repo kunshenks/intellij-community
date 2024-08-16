@@ -52,11 +52,6 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
             runTest("testData/refactoring/changePackage/kotlin/changeToNonDefaultPackage/changeToNonDefaultPackage.test");
         }
 
-        @TestMetadata("kotlin/headerClasses/headerClasses.test")
-        public void testKotlin_headerClasses_HeaderClasses() throws Exception {
-            runTest("testData/refactoring/changePackage/kotlin/headerClasses/headerClasses.test");
-        }
-
         @TestMetadata("kotlin/longName/longName.test")
         public void testKotlin_longName_LongName() throws Exception {
             runTest("testData/refactoring/changePackage/kotlin/longName/longName.test");
@@ -149,6 +144,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
             runTest("testData/refactoring/moveFile/java/moveFileToAnotherPackage/moveFileToAnotherPackage.test");
         }
 
+        @TestMetadata("java/movePackageWithDestructuringReference/movePackageWithDestructuringReference.test")
+        public void testJava_movePackageWithDestructuringReference_MovePackageWithDestructuringReference() throws Exception {
+            runTest("testData/refactoring/moveFile/java/movePackageWithDestructuringReference/movePackageWithDestructuringReference.test");
+        }
+
         @TestMetadata("kotlin/addExtensionImport/addExtensionImport.test")
         public void testKotlin_addExtensionImport_AddExtensionImport() throws Exception {
             runTest("testData/refactoring/moveFile/kotlin/addExtensionImport/addExtensionImport.test");
@@ -182,6 +182,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
         @TestMetadata("kotlin/moveClassWithExtensionFunction/moveClassWithExtensionFunction.test")
         public void testKotlin_moveClassWithExtensionFunction_MoveClassWithExtensionFunction() throws Exception {
             runTest("testData/refactoring/moveFile/kotlin/moveClassWithExtensionFunction/moveClassWithExtensionFunction.test");
+        }
+
+        @TestMetadata("kotlin/moveDetachedComment/moveDetachedComment.test")
+        public void testKotlin_moveDetachedComment_MoveDetachedComment() throws Exception {
+            runTest("testData/refactoring/moveFile/kotlin/moveDetachedComment/moveDetachedComment.test");
         }
 
         @TestMetadata("kotlin/moveFileAndDirWithJavaFileReferringToPackageFragementWithUnmatchedDir/moveFileAndDirWithJavaFileReferringToPackageFragementWithUnmatchedDir.test")
@@ -237,6 +242,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
         @TestMetadata("kotlin/moveObject/moveObject.test")
         public void testKotlin_moveObject_MoveObject() throws Exception {
             runTest("testData/refactoring/moveFile/kotlin/moveObject/moveObject.test");
+        }
+
+        @TestMetadata("kotlin/movePropertyDelegateReference/movePropertyDelegateReference.test")
+        public void testKotlin_movePropertyDelegateReference_MovePropertyDelegateReference() throws Exception {
+            runTest("testData/refactoring/moveFile/kotlin/movePropertyDelegateReference/movePropertyDelegateReference.test");
         }
 
         @TestMetadata("kotlin/moveUnaryOperator/moveUnaryOperator.test")
@@ -296,6 +306,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
         @TestMetadata("java/moveTopLevelClassToAnotherPackage/moveTopLevelClassToAnotherPackage.test")
         public void testJava_moveTopLevelClassToAnotherPackage_MoveTopLevelClassToAnotherPackage() throws Exception {
             runTest("testData/refactoring/moveTopLevel/java/moveTopLevelClassToAnotherPackage/moveTopLevelClassToAnotherPackage.test");
+        }
+
+        @TestMetadata("kotlin/callableReference/callableReference.test")
+        public void testKotlin_callableReference_CallableReference() throws Exception {
+            runTest("testData/refactoring/moveTopLevel/kotlin/callableReference/callableReference.test");
         }
 
         @TestMetadata("kotlin/callsAndCallableRefs/internalUsages/differentSourceAndTargetWithFqNames/differentSourceAndTargetWithFqNames.test")
@@ -453,6 +468,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
             runTest("testData/refactoring/moveTopLevel/kotlin/invokeOperatorInternalUsage/invokeOperatorInternalUsage.test");
         }
 
+        @TestMetadata("kotlin/iteratorOperatorInternalUsage/iteratorOperatorInternalUsage.test")
+        public void testKotlin_iteratorOperatorInternalUsage_IteratorOperatorInternalUsage() throws Exception {
+            runTest("testData/refactoring/moveTopLevel/kotlin/iteratorOperatorInternalUsage/iteratorOperatorInternalUsage.test");
+        }
+
         @TestMetadata("kotlin/kt17032/kt17032.test")
         public void testKotlin_kt17032_Kt17032() throws Exception {
             runTest("testData/refactoring/moveTopLevel/kotlin/kt17032/kt17032.test");
@@ -531,6 +551,11 @@ public abstract class MoveTestGenerated extends AbstractMoveTest {
         @TestMetadata("kotlin/moveFunctionWithImportsRetained/moveFunctionWithImportsRetained.test")
         public void testKotlin_moveFunctionWithImportsRetained_MoveFunctionWithImportsRetained() throws Exception {
             runTest("testData/refactoring/moveTopLevel/kotlin/moveFunctionWithImportsRetained/moveFunctionWithImportsRetained.test");
+        }
+
+        @TestMetadata("kotlin/moveMultipleWithComments/moveMultipleWithComments.test")
+        public void testKotlin_moveMultipleWithComments_MoveMultipleWithComments() throws Exception {
+            runTest("testData/refactoring/moveTopLevel/kotlin/moveMultipleWithComments/moveMultipleWithComments.test");
         }
 
         @TestMetadata("kotlin/moveObjectToFile/moveObjectToFile.test")

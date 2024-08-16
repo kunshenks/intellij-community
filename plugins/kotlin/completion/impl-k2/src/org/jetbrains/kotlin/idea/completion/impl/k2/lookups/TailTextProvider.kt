@@ -15,26 +15,22 @@ import org.jetbrains.kotlin.analysis.api.symbols.typeParameters
 import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.idea.completion.impl.k2.KotlinCompletionImplK2Bundle
-import org.jetbrains.kotlin.idea.completion.lookups.CompletionShortNamesRenderer.renderFunctionParameters
 import org.jetbrains.kotlin.idea.completion.lookups.CompletionShortNamesRenderer.renderFunctionalTypeParameters
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.renderer.render
 import org.jetbrains.kotlin.types.Variance
 
 internal object TailTextProvider {
+
     context(KaSession)
-    fun getTailText(signature: KaCallableSignature<*>, options: CallableInsertionOptions): String = buildString {
-        if (signature is KaFunctionSignature<*>) {
-            if (insertLambdaBraces(signature, options)) {
-                append(" {...} ")
-            }
-            append(renderFunctionParameters(signature))
-        }
-
+    fun getTailText(
+        signature: KaCallableSignature<*>,
+    ): String = buildString {
         // use unsubstituted type when rendering receiver type of extension
-        signature.symbol.receiverType?.let { renderReceiverType(it) }
+        val symbol = signature.symbol
+        symbol.receiverType?.let { renderReceiverType(it) }
 
-        signature.symbol.getContainerPresentation(isFunctionalVariableCall = false)?.let { append(it) }
+        symbol.getContainerPresentation(isFunctionalVariableCall = false)?.let { append(it) }
     }
 
     context(KaSession)
@@ -100,19 +96,20 @@ internal object TailTextProvider {
         if (isRoot) "<root>" else asString()
 
     context(KaSession)
-    fun insertLambdaBraces(symbol: KaFunctionSignature<*>, options: CallableInsertionOptions): Boolean {
-        val lambdaBracesAreDisabledByInsertionStrategy = when (options.insertionStrategy) {
-            is CallableInsertionStrategy.AsCall,
-            is CallableInsertionStrategy.WithSuperDisambiguation -> false
+    fun insertLambdaBraces(
+        symbol: KaFunctionSignature<*>,
+        insertionStrategy: CallableInsertionStrategy,
+    ): Boolean = when (insertionStrategy) {
+        is CallableInsertionStrategy.AsIdentifier,
+        is CallableInsertionStrategy.WithCallArgs,
+        is CallableInsertionStrategy.AsIdentifierCustom -> false
 
-            is CallableInsertionStrategy.AsIdentifier,
-            is CallableInsertionStrategy.WithCallArgs,
-            is CallableInsertionStrategy.AsIdentifierCustom -> true
+        else -> {
+            symbol.valueParameters
+                .singleOrNull()
+                ?.takeUnless { it.symbol.hasDefaultValue }
+                ?.returnType is KaFunctionType
         }
-        if (lambdaBracesAreDisabledByInsertionStrategy) return false
-
-        val singleParam = symbol.valueParameters.singleOrNull()
-        return singleParam != null && !singleParam.symbol.hasDefaultValue && singleParam.returnType is KaFunctionType
     }
 
     context(KaSession)

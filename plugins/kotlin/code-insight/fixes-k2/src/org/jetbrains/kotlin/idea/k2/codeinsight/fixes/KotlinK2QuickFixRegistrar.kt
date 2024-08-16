@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.idea.core.overrideImplement.MemberNotImplementedQuic
 import org.jetbrains.kotlin.idea.inspections.RemoveAnnotationFix
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.imprt.ImportQuickFixFactories
 import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.replaceWith.DeprecationFixFactory
+import org.jetbrains.kotlin.idea.k2.codeinsight.fixes.replaceWith.ReplaceProtectedToPublishedApiCallFixFactory
 import org.jetbrains.kotlin.idea.quickfix.*
 
 class KotlinK2QuickFixRegistrar : KotlinQuickFixRegistrar() {
@@ -309,6 +310,11 @@ class KotlinK2QuickFixRegistrar : KotlinQuickFixRegistrar() {
         registerFactory(SpecifyRemainingArgumentsByNameFixFactory.noValueForParameter)
 
         registerFactory(AddConstructorParameterFromSuperTypeCallFixFactory.noValueForParameter)
+
+        registerFactory(ConvertToIsArrayOfCallFixFactory.cannotCheckForErased)
+
+        registerFactory(ReplaceProtectedToPublishedApiCallFixFactory.protectedCallFromPublicInline)
+        registerFactory(ReplaceProtectedToPublishedApiCallFixFactory.protectedCallFromPublicInlineError)
     }
 
     private val whenStatements = KtQuickFixesListBuilder.registerPsiQuickFix {
@@ -440,6 +446,10 @@ class KotlinK2QuickFixRegistrar : KotlinQuickFixRegistrar() {
         registerFactory(DeprecationFixFactory.deprecatedAliasWarning)
 
         registerFactory(ChangeMemberFunctionSignatureFixFactory.nothingToOverrideFixFactory)
+
+        registerFactory(ReplaceJvmFieldWithConstFixFactory.inapplicableJvmField)
+
+        registerFactory(ConvertExtensionToFunctionTypeFixFactory.superTypeIsExtensionFunctionType)
     }
 
     private val optIn = KtQuickFixesListBuilder.registerPsiQuickFix {

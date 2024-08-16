@@ -17,14 +17,12 @@ package org.jetbrains.idea.maven.dom
 
 import com.intellij.codeInspection.LocalInspectionTool
 import com.intellij.codeInspection.ProblemsHolder
-import com.intellij.openapi.application.EDT
+import com.intellij.maven.testFramework.MavenMultiVersionImportingTestCase.*
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.psi.ElementManipulators
 import com.intellij.psi.PsiElementVisitor
 import com.intellij.psi.PsiFile
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
 import org.jetbrains.idea.maven.dom.inspections.MavenParentMissedVersionInspection
 import org.jetbrains.idea.maven.dom.inspections.MavenPropertyInParentInspection
 import org.jetbrains.idea.maven.dom.inspections.MavenRedundantGroupIdInspection
@@ -32,14 +30,9 @@ import org.jetbrains.idea.maven.utils.MavenLog
 import org.junit.Test
 
 class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
-  @Test
-  fun testVariants() = runBlocking {
-    importProjectAsync("""
-                    <groupId>test</groupId>
-                    <artifactId>project</artifactId>
-                    <version>1</version>
-                    """.trimIndent())
 
+  @Test
+  fun testVariants() = runBlockingNoSync {
     createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
@@ -93,7 +86,8 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
 
     importProjectsAsync(projectPom, m)
 
-    createModulePom("m", """
+    withoutSync {
+      createModulePom("m", """
       <groupId>test</groupId>
       <artifactId>m</artifactId>
       <version>1</version>
@@ -104,18 +98,13 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
       </parent>
       """.trimIndent())
 
-    withContext(Dispatchers.EDT) {
       assertResolved(m, findPsiFile(projectPom))
     }
+
   }
 
   @Test
-  fun testResolutionOutsideOfTheProject() = runBlocking {
-    importProjectAsync("""
-                    <groupId>test</groupId>
-                    <artifactId>project</artifactId>
-                    <version>1</version>
-                    """.trimIndent())
+  fun testResolutionOutsideOfTheProject() = runBlockingNoSync {
 
     updateProjectPom("""
                        <groupId>test</groupId>
@@ -131,18 +120,11 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
     val filePath = myIndicesFixture!!.repositoryHelper.getTestDataPath("local1/junit/junit/4.0/junit-4.0.pom")
     val f = LocalFileSystem.getInstance().findFileByPath(filePath)
 
-    withContext(Dispatchers.EDT) {
-      assertResolved(projectPom, findPsiFile(f))
-    }
+    assertResolved(projectPom, findPsiFile(f))
   }
 
   @Test
-  fun testResolvingByRelativePath() = runBlocking {
-    importProjectAsync("""
-                    <groupId>test</groupId>
-                    <artifactId>project</artifactId>
-                    <version>1</version>
-                    """.trimIndent())
+  fun testResolvingByRelativePath() = runBlockingNoSync {
 
     createProjectPom("""
                        <groupId>test</groupId>
@@ -163,18 +145,11 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                                            <version>1</version>
                                            """.trimIndent())
 
-    withContext(Dispatchers.EDT) {
-      assertResolved(projectPom, findPsiFile(parent))
-    }
+    assertResolved(projectPom, findPsiFile(parent))
   }
 
   @Test
-  fun testResolvingByRelativePathWithProperties() = runBlocking {
-    importProjectAsync("""
-                    <groupId>test</groupId>
-                    <artifactId>project</artifactId>
-                    <version>1</version>
-                    """.trimIndent())
+  fun testResolvingByRelativePathWithProperties() = runBlockingNoSync {
 
     val parent = createModulePom("parent",
                                  """
@@ -198,12 +173,10 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        </parent>
                        """.trimIndent())
 
-    withContext(Dispatchers.EDT) {
-      moveCaretTo(projectPom, """
-        <parent>
-          <groupId><caret>test</groupId>""".trimIndent())
-      assertResolved(projectPom, findPsiFile(parent))
-    }
+    moveCaretTo(projectPom, """
+      <parent>
+        <groupId><caret>test</groupId>""".trimIndent())
+    assertResolved(projectPom, findPsiFile(parent))
   }
 
   @Test
@@ -221,7 +194,8 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                     <version>1</version>
                     """.trimIndent())
 
-    createProjectPom("""
+    withoutSync {
+      createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
@@ -233,9 +207,9 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        </parent>
                        """.trimIndent())
 
-    withContext(Dispatchers.EDT) {
       assertResolved(projectPom, findPsiFile(parent))
     }
+
   }
 
   @Test
@@ -255,8 +229,9 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
 
     importProjectAsync()
 
-    setPomContent(projectPom,
-                  """
+    withoutSync {
+      setPomContent(projectPom,
+                    """
                     <warning descr="Definition of groupId is redundant, because it's inherited from the parent"><groupId>test</groupId></warning>
                     <artifactId>project</artifactId>
                     <version>1</version>
@@ -268,8 +243,10 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                     </parent>
                     """.trimIndent())
 
-    fixture.enableInspections(MavenRedundantGroupIdInspection::class.java)
-    checkHighlighting()
+      fixture.enableInspections(MavenRedundantGroupIdInspection::class.java)
+      checkHighlighting()
+    }
+
   }
 
   @Test
@@ -313,8 +290,9 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
 
     importProjectAsync()
 
-    m2 = createModulePom("m2",
-                         """
+    withoutSync {
+      m2 = createModulePom("m2",
+                           """
                            <parent>
                            <groupId>test</groupId>
                            <artifactId><error descr="Properties in parent definition are prohibited">project${'$'}{anotherProperty}</error></artifactId>
@@ -323,8 +301,10 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                            <artifactId>m1</artifactId>
                            """.trimIndent())
 
-    fixture.enableInspections(listOf<Class<out LocalInspectionTool?>>(MavenPropertyInParentInspection::class.java))
-    checkHighlighting(m2)
+      fixture.enableInspections(listOf<Class<out LocalInspectionTool?>>(MavenPropertyInParentInspection::class.java))
+      checkHighlighting(m2)
+    }
+
   }
 
   @Test
@@ -523,22 +503,25 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
   }
 
   @Test
-  fun testHighlightingAbsentArtifactId() = runBlocking {
+  fun testHighlightingAbsentArtifactIdMaven4() = runBlocking {
+    assumeMaven4()
     createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
                        <<error descr="'artifactId' child tag should be defined">parent</error>>
                          <groupId>junit</groupId>
-                         <version><error>4.0</error></version>
+                         <version>4.0</version>
                        </parent>
                        """.trimIndent())
-    importProjectAsync()
+
     checkHighlighting()
   }
 
+
   @Test
   fun testHighlightingAbsentVersion() = runBlocking {
+    assumeMaven3()
     createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
@@ -548,8 +531,6 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                          <artifactId>junit</artifactId>
                        </parent>
                        """.trimIndent())
-    importProjectAsync()
-
     fixture.enableInspections(MavenParentMissedVersionInspection::class.java)
     checkHighlighting()
   }
@@ -561,8 +542,8 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                     <artifactId>project</artifactId>
                     <version>1</version>
                     """.trimIndent())
-
-    createProjectPom("""
+    withoutSync {
+      createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
@@ -574,7 +555,8 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        </parent>
                        """.trimIndent())
 
-    checkHighlighting()
+      checkHighlighting()
+    }
   }
 
   @Test
@@ -593,8 +575,8 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                                       """.trimIndent())
 
     importProjectsAsync(projectPom, m)
-
-    createProjectPom("""
+    withoutSync {
+      updateProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
@@ -606,15 +588,15 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        </parent>
                        """.trimIndent())
 
-    withContext(Dispatchers.EDT) {
       val i = getIntentionAtCaret("Fix Relative Path")
       assertNotNull(i)
-
       fixture.launchAction(i!!)
       val el = getElementAtCaret(projectPom)!!
 
       assertEquals("bar/pom.xml", ElementManipulators.getValueText(el))
     }
+
+
   }
 
   @Test
@@ -632,9 +614,10 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                                       <version>1</version>
                                       """.trimIndent())
 
-    importProjects(projectPom, m)
+    importProjectsAsync(projectPom, m)
 
-    createProjectPom("""
+    withoutSync {
+      createProjectPom("""
                        <groupId>test</groupId>
                        <artifactId>project</artifactId>
                        <version>1</version>
@@ -646,6 +629,7 @@ class MavenParentCompletionAndResolutionTest : MavenDomWithIndicesTestCase() {
                        </parent>
                        """.trimIndent())
 
-    assertNull(getIntentionAtCaret("Fix relative path"))
+      assertNull(getIntentionAtCaret("Fix relative path"))
+    }
   }
 }

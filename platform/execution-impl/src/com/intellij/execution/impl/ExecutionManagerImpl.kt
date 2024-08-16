@@ -3,6 +3,7 @@ package com.intellij.execution.impl
 
 import com.intellij.CommonBundle
 import com.intellij.build.BuildContentManager
+import com.intellij.concurrency.IntelliJContextElement
 import com.intellij.concurrency.currentThreadContext
 import com.intellij.concurrency.installThreadContext
 import com.intellij.execution.*
@@ -98,8 +99,10 @@ open class ExecutionManagerImpl(private val project: Project, coroutineScope: Co
       return installThreadContext(context + EnvDataContextElement(dataContext), true)
     }
 
-    private class EnvDataContextElement(val dataContext: DataContext?) : CoroutineContext.Element {
+    private class EnvDataContextElement(val dataContext: DataContext?) : CoroutineContext.Element, IntelliJContextElement {
       companion object : CoroutineContext.Key<EnvDataContextElement>
+
+      override fun produceChildElement(parentContext: CoroutineContext, isStructured: Boolean): IntelliJContextElement = this
 
       override val key: CoroutineContext.Key<*> = EnvDataContextElement
     }
@@ -588,36 +591,39 @@ open class ExecutionManagerImpl(private val project: Project, coroutineScope: Co
 
     awaitingRunProfiles[environment.runProfile] = environment
 
+    // Can be called via Alarm, which doesn't provide implicit WIRA
     awaitTermination(object : Runnable {
       override fun run() {
-        if (awaitingRunProfiles[environment.runProfile] !== environment) {
-          // a new rerun has been requested before starting this one, ignore this rerun
-          return
-        }
-        val inProgressEntry = InProgressEntry(configuration?.uniqueID ?: "", environment.executor.id, environment.runner.runnerId)
-        if ((configuration != null && !configuration.type.isDumbAware && DumbService.getInstance(project).isDumb)
-            || inProgress.contains(inProgressEntry)) {
-          awaitTermination(this, 100)
-          return
-        }
-
-        for (descriptor in runningOfTheSameType) {
-          val processHandler = descriptor.processHandler
-          if (processHandler != null && !processHandler.isProcessTerminated) {
-            awaitTermination(this, 100)
-            return
+        WriteIntentReadAction.run wira@{
+          if (awaitingRunProfiles[environment.runProfile] !== environment) {
+            // a new rerun has been requested before starting this one, ignore this rerun
+            return@wira
           }
+          val inProgressEntry = InProgressEntry(configuration?.uniqueID ?: "", environment.executor.id, environment.runner.runnerId)
+          if ((configuration != null && !configuration.type.isDumbAware && DumbService.getInstance(project).isDumb)
+              || inProgress.contains(inProgressEntry)) {
+            awaitTermination(this, 100)
+            return@wira
+          }
+
+          for (descriptor in runningOfTheSameType) {
+            val processHandler = descriptor.processHandler
+            if (processHandler != null && !processHandler.isProcessTerminated) {
+              awaitTermination(this, 100)
+              return@wira
+            }
+          }
+
+          awaitingRunProfiles.remove(environment.runProfile)
+
+          // start() can be called during restartRunProfile() after pretty long 'awaitTermination()' so we have to check if the project is still here
+          if (environment.project.isDisposed) {
+            return@wira
+          }
+
+          val settings = environment.runnerAndConfigurationSettings
+          executeConfiguration(environment, settings != null && settings.isEditBeforeRun)
         }
-
-        awaitingRunProfiles.remove(environment.runProfile)
-
-        // start() can be called during restartRunProfile() after pretty long 'awaitTermination()' so we have to check if the project is still here
-        if (environment.project.isDisposed) {
-          return
-        }
-
-        val settings = environment.runnerAndConfigurationSettings
-        executeConfiguration(environment, settings != null && settings.isEditBeforeRun)
       }
     }, 50)
   }

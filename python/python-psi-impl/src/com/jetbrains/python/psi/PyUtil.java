@@ -53,6 +53,7 @@ import com.jetbrains.python.psi.types.*;
 import com.jetbrains.python.pyi.PyiStubSuppressor;
 import one.util.streamex.StreamEx;
 import org.jetbrains.annotations.*;
+import org.jetbrains.jps.model.java.JavaSourceRootType;
 
 import javax.swing.*;
 import java.io.File;
@@ -706,12 +707,8 @@ public final class PyUtil {
     if (isInitMethod(function)) {
       final PyClass cls = function.getContainingClass();
       if (cls != null) {
-        for (PyTypeProvider provider : PyTypeProvider.EP_NAME.getExtensionList()) {
-          final PyType providedClassType = provider.getGenericType(cls, context);
-          if (providedClassType != null) {
-            return providedClassType;
-          }
-        }
+        PyType providedClassType = getGenericTypeForClass(context, cls);
+        if (providedClassType != null) return providedClassType;
 
         final PyInstantiableType classType = as(context.getType(cls), PyInstantiableType.class);
         if (classType != null) {
@@ -721,6 +718,16 @@ public final class PyUtil {
     }
 
     return context.getReturnType(function);
+  }
+
+  public static @Nullable PyType getGenericTypeForClass(@NotNull TypeEvalContext context, PyClass cls) {
+    for (PyTypeProvider provider : PyTypeProvider.EP_NAME.getExtensionList()) {
+      final PyType providedClassType = provider.getGenericType(cls, context);
+      if (providedClassType != null) {
+        return providedClassType;
+      }
+    }
+    return null;
   }
 
   /**
@@ -1053,13 +1060,13 @@ public final class PyUtil {
           for (ContentEntry entry : model.getContentEntries()) {
             final VirtualFile file = entry.getFile();
             if (file != null && VfsUtilCore.isAncestor(file, root, true)) {
-              entry.addSourceFolder(root, false);
+              entry.addSourceFolder(root.getUrl(), JavaSourceRootType.SOURCE, true);
               added = true;
             }
           }
 
           if (!added) {
-            model.addContentEntry(root).addSourceFolder(root, false);
+            model.addContentEntry(root).addSourceFolder(root.getUrl(), JavaSourceRootType.SOURCE, true);
           }
         }
         model.commit();

@@ -57,6 +57,8 @@ import sun.awt.AppContext
 import sun.awt.PeerEvent
 import sun.awt.SunToolkit
 import java.awt.*
+import java.awt.EventQueue.invokeLater
+import java.awt.EventQueue.isDispatchThread
 import java.awt.event.*
 import java.lang.invoke.MethodHandle
 import java.lang.invoke.MethodHandles
@@ -344,7 +346,7 @@ class IdeEventQueue private constructor() : EventQueue() {
           val progressManager = ProgressManager.getInstanceOrNull()
           try {
             runCustomProcessors(finalEvent, preProcessors)
-            performActivity(finalEvent) {
+            performActivity(finalEvent, isCoroutineWILEnabled && !threadingSupport.isInsideUnlockedWriteIntentLock()) {
               if (progressManager == null) {
                 _dispatchEvent(finalEvent)
               }
@@ -681,8 +683,24 @@ class IdeEventQueue private constructor() : EventQueue() {
       val source = e.source
       if (source is IdeFrameImpl) {
         when (e.id) {
-          WindowEvent.WINDOW_ACTIVATED -> source.mouseReleaseCountSinceLastActivated = 0
-          MouseEvent.MOUSE_RELEASED -> ++source.mouseReleaseCountSinceLastActivated
+          MouseEvent.MOUSE_MOVED -> {
+            e as MouseEvent
+            if (!source.isActive) {
+              source.lastInactiveMouseXAbs = e.xOnScreen
+              source.lastInactiveMouseYAbs = e.yOnScreen
+            }
+          }
+          WindowEvent.WINDOW_ACTIVATED -> {
+            source.isFirstMousePressed = true
+          }
+          MouseEvent.MOUSE_PRESSED -> {
+            e as MouseEvent
+            source.wasJustActivatedByClick =
+              source.isFirstMousePressed &&
+              e.xOnScreen == source.lastInactiveMouseXAbs &&
+              e.yOnScreen == source.lastInactiveMouseYAbs
+            source.isFirstMousePressed = false
+          }
         }
       }
       super.dispatchEvent(e)
@@ -1010,7 +1028,7 @@ private fun isInputEvent(e: AWTEvent): Boolean {
   return e is InputEvent || e is InputMethodEvent || e is WindowEvent || e is ActionEvent
 }
 
-internal fun performActivity(e: AWTEvent, runnable: () -> Unit) {
+internal fun performActivity(e: AWTEvent, needWIL: Boolean, runnable: () -> Unit) {
   var transactionGuard = transactionGuard
   if (transactionGuard == null && appIsLoaded()) {
     val app = ApplicationManager.getApplication()
@@ -1024,7 +1042,7 @@ internal fun performActivity(e: AWTEvent, runnable: () -> Unit) {
     runnable()
   }
   else {
-    val runnableWithWIL = {  WriteIntentReadAction.run(runnable) }
+    val runnableWithWIL = if (needWIL) { { WriteIntentReadAction.run(runnable) } } else { runnable }
     transactionGuard.performActivity(isInputEvent(e) || e is ItemEvent || e is FocusEvent, runnableWithWIL)
   }
 }

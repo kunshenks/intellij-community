@@ -9,10 +9,8 @@ import io.opentelemetry.api.trace.Span
 import kotlinx.collections.immutable.*
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.ApiStatus.Obsolete
-import org.jetbrains.intellij.build.BuildContext
-import org.jetbrains.intellij.build.JvmArchitecture
-import org.jetbrains.intellij.build.OsFamily
-import org.jetbrains.intellij.build.PluginBundlingRestrictions
+import org.jetbrains.annotations.TestOnly
+import org.jetbrains.intellij.build.*
 import org.jetbrains.intellij.build.io.copyDir
 import org.jetbrains.intellij.build.io.copyFileToDir
 import java.nio.file.FileSystemException
@@ -37,6 +35,17 @@ class PluginLayout private constructor(
   )
 
   private var mainJarName = "$mainJarNameWithoutExtension.jar"
+
+  /** module name to name of the library */
+  @JvmField
+  internal val excludedLibraries: MutableMap<String?, MutableList<String>> = HashMap()
+
+  internal fun excludeProjectLibrary(libraryName: String) {
+    excludedLibraries.computeIfAbsent(null) { ArrayList() }.add(libraryName)
+  }
+
+  @TestOnly
+  fun isLibraryExcluded(name: String): Boolean = excludedLibraries.get(null)?.contains(name) ?: false
 
   var directoryName: String = mainJarNameWithoutExtension
     private set
@@ -75,7 +84,13 @@ class PluginLayout private constructor(
   var retainProductDescriptorForBundledPlugin: Boolean = false
   var enableSymlinksAndExecutableResources: Boolean = false
 
+  @JvmField
+  internal var modulesWithExcludedModuleLibraries: Set<String> = persistentSetOf()
+
   internal var resourceGenerators: PersistentList<ResourceGenerator> = persistentListOf()
+    private set
+
+  internal var customAssets: PersistentList<CustomAssetDescriptor> = persistentListOf()
     private set
 
   internal var platformResourceGenerators: PersistentMap<SupportedDistribution, PersistentList<ResourceGenerator>> = persistentMapOf()
@@ -181,6 +196,14 @@ class PluginLayout private constructor(
      */
     val bundlingRestrictions: PluginBundlingRestrictions.Builder = PluginBundlingRestrictions.Builder()
 
+    fun excludeModuleLibrary(libraryName: String, moduleName: String) {
+      layout.excludedLibraries.computeIfAbsent(moduleName) { ArrayList() }.add(libraryName)
+    }
+
+    fun excludeProjectLibrary(libraryName: String) {
+      layout.excludeProjectLibrary(libraryName)
+    }
+
     /**
      * @param resourcePath path to resource file or directory relative to the plugin's main module content root
      * @param relativeOutputPath target path relative to the plugin root directory
@@ -191,6 +214,14 @@ class PluginLayout private constructor(
 
     fun withGeneratedResources(generator: ResourceGenerator) {
       layout.resourceGenerators += generator
+    }
+
+    fun withCustomAsset(lazySourceSupplier: (context: BuildContext) -> LazySource?) {
+      layout.customAssets += object : CustomAssetDescriptor {
+        override suspend fun getSources(context: BuildContext): Sequence<Source>? {
+          return sequenceOf(lazySourceSupplier(context) ?: return null)
+        }
+      }
     }
 
     fun withGeneratedPlatformResources(os: OsFamily, arch: JvmArchitecture, generator: ResourceGenerator) {

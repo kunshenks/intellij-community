@@ -1,4 +1,4 @@
-// Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.actions.searcheverywhere.statistics;
 
 import com.intellij.ide.actions.searcheverywhere.SearchEverywhereContributor;
@@ -96,18 +96,16 @@ public final class SearchEverywhereUsageTriggerCollector extends CounterUsagesCo
     TIME_TO_FIRST_RESULT, FIRST_TAB_ID, TIME_TO_FIRST_RESULT_LAST_QUERY, LAST_TAB_ID, DURATION_MS,
     ML_EXPERIMENT_GROUP, ML_EXPERIMENT_VERSION
   );
-  public static final BooleanEventField PREVIEW_STATE = EventFields.Boolean("previewState");
-  public static final VarargEventId PREVIEW_SWITCHED = GROUP.registerVarargEvent("previewSwitched", PREVIEW_STATE);
-  public static final BooleanEventField PREVIEW_CLOSED_STATE = EventFields.Boolean("previewClosed");
-  public static final VarargEventId PREVIEW_CLOSED = GROUP.registerVarargEvent("previewClosed", PREVIEW_CLOSED_STATE);
+
+  public static final EventId1<Boolean> PREVIEW_SWITCHED = GROUP.registerEvent("previewSwitched", EventFields.Boolean("previewState"));
+  public static final EventId1<Boolean> PREVIEW_CLOSED = GROUP.registerEvent("previewClosed", EventFields.Boolean("previewClosed"));
 
   @Override
   public EventLogGroup getGroup() {
     return GROUP;
   }
 
-  @NotNull
-  public static String getReportableContributorID(@NotNull SearchEverywhereContributor<?> contributor) {
+  public static @NotNull String getReportableContributorID(@NotNull SearchEverywhereContributor<?> contributor) {
     Class<? extends SearchEverywhereContributor> clazz = contributor.getClass();
     PluginInfo pluginInfo = PluginInfoDetectorKt.getPluginInfo(clazz);
     return pluginInfo.isDevelopedByJetBrains() ? contributor.getSearchProviderId() : NOT_REPORTABLE_CONTRIBUTOR_ID;

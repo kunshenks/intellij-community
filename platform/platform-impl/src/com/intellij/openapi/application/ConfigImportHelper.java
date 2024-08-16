@@ -13,7 +13,9 @@ import com.intellij.ide.plugins.marketplace.MarketplacePluginDownloadService;
 import com.intellij.ide.startup.StartupActionScriptManager;
 import com.intellij.ide.startup.StartupActionScriptManager.ActionCommand;
 import com.intellij.ide.ui.laf.LookAndFeelThemeAdapterKt;
+import com.intellij.idea.AppMode;
 import com.intellij.openapi.application.migrations.AIAssistant241;
+import com.intellij.openapi.application.migrations.JpaBuddyMigration242;
 import com.intellij.openapi.application.migrations.NotebooksMigration242;
 import com.intellij.openapi.application.migrations.PythonProMigration242;
 import com.intellij.openapi.components.StoragePathMacros;
@@ -224,6 +226,11 @@ public final class ConfigImportHelper {
         var configImportOptions = new ConfigImportOptions(log);
         configImportOptions.importSettings = settings;
         configImportOptions.mergeVmOptions = customMigrationOption instanceof CustomConfigMigrationOption.MergeConfigs;
+        
+        /* in remote dev host mode UI cannot be shown before `Application` is initialized because it replaces the standard `awt.toolkit` 
+           with com.intellij.platform.impl.toolkit.IdeToolkit which depends on `Application` */
+        configImportOptions.setHeadless(AppMode.isRemoteDevHost());
+        
         if (!guessedOldConfigDirs.fromSameProduct) {
           importScenarioStatistics = IMPORTED_FROM_OTHER_PRODUCT;
         }
@@ -1066,6 +1073,7 @@ public final class ConfigImportHelper {
     new AIAssistant241().migratePlugins(options);
     new PythonProMigration242().migratePlugins(options);
     new NotebooksMigration242().migratePlugins(options);
+    new JpaBuddyMigration242().migratePlugins(options);
   }
 
   private static void migrateGlobalPlugins(Path newConfigDir,
@@ -1176,7 +1184,7 @@ public final class ConfigImportHelper {
     if (options.headless) {
       PluginDownloader.runSynchronouslyInBackground(() -> {
         ProgressIndicator progressIndicator =
-          options.headlessProgressIndicator == null ? new EmptyProgressIndicator() : options.headlessProgressIndicator;
+          options.headlessProgressIndicator == null ? new EmptyProgressIndicator(ModalityState.nonModal()) : options.headlessProgressIndicator;
         downloadUpdatesForIncompatiblePlugins(newPluginsDir, options, incompatiblePlugins, progressIndicator);
       });
     }

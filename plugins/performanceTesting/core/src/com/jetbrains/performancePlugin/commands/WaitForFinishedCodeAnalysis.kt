@@ -28,10 +28,14 @@ import com.intellij.platform.diagnostic.telemetry.Scope
 import com.intellij.platform.diagnostic.telemetry.TelemetryManager
 import com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.FUSProjectHotStartUpMeasurerService
 import com.intellij.util.concurrency.annotations.RequiresReadLock
+import com.intellij.util.ui.EDT
 import com.intellij.util.ui.UIUtil
 import kotlinx.coroutines.*
+import java.util.Collections
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import kotlin.time.Duration
@@ -53,28 +57,11 @@ private fun Collection<FileEditor>.getWorthy(): List<TextEditor> {
 internal class WaitForFinishedCodeAnalysis(text: String, line: Int) : PerformanceCommandCoroutineAdapter(text, line) {
   companion object {
     const val PREFIX = CMD_PREFIX + "waitForFinishedCodeAnalysis"
+    val LOG = logger<WaitForFinishedCodeAnalysis>()
   }
 
   override suspend fun doExecute(context: PlaybackContext) {
-    val checkingJob = coroutineScope {
-      launch {
-        while (true) {
-          @Suppress("TestOnlyProblems")
-          if (!service<FUSProjectHotStartUpMeasurerService>().isHandlingFinished()) {
-            delay(500)
-          }
-          else {
-            return@launch
-          }
-        }
-      }
-    }
-    checkingJob.join()
-    // WaitForFinishedCodeAnalysisFileEditorListener.fileOpenedSync works on EDT,
-    // so this is to ensure the reopened editor from startup would be caught by the listener before we ask ListenerState to wait
-    withContext(Dispatchers.EDT) {
-      // do nothing
-    }
+    LOG.info("WaitForFinishedCodeAnalysis started its execution")
     context.project.service<CodeAnalysisStateListener>().waitAnalysisToFinish()
   }
 
@@ -91,16 +78,17 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
   }
 
   private val stateLock = Any()
+  private val filesYetToStartHighlighting = ConcurrentHashMap<VirtualFile, Unit>()
   private val sessions = ConcurrentHashMap<TextEditor, ExceptionWithTime>()
-  private val highlightingFinishedEverywhere: Semaphore = Semaphore(1)
+  private val waitingJobs: MutableList<CompletableFuture<Unit>> = Collections.synchronizedList(mutableListOf<CompletableFuture<Unit>>())
   private var locked: Boolean = false
 
   private fun ensureLockedIfNeeded() {
     synchronized(stateLock) {
       @Suppress("UsePropertyAccessSyntax") // inhibit weak warning, for property access is a warning
-      if (!sessions.isEmpty() && !locked) {
-        LOG.info("Highlighting began with ${sessions.keys.joinToString(separator = ",\n") { it.description }}")
-        highlightingFinishedEverywhere.acquire()
+      if ((!sessions.isEmpty() || !filesYetToStartHighlighting.isEmpty()) && !locked) {
+        LOG.info("Highlighting began with ${sessions.keys.joinToString(separator = ",\n") { it.description }} \n" +
+                 "and files ${filesYetToStartHighlighting.keys.joinToString(separator = ",\n") { it.name }}")
         locked = true
       }
     }
@@ -113,10 +101,15 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
       }
 
       @Suppress("UsePropertyAccessSyntax")  // inhibit weak warning, for property access is a warning
-      if (sessions.isEmpty()) {
-        LOG.info("Highlighting done")
-        LOG.info("Total opening time is : ${(System.nanoTime() - StartUpMeasurer.getStartTime()).nanoseconds.inWholeMilliseconds}")
-        highlightingFinishedEverywhere.release()
+      if (sessions.isEmpty() && filesYetToStartHighlighting.isEmpty()) {
+        LOG.info("""
+          Highlighting done,
+          Total opening time is : ${(System.nanoTime() - StartUpMeasurer.getStartTime()).nanoseconds.inWholeMilliseconds}
+         """)
+        for (job in waitingJobs) {
+          job.complete(Unit)
+        }
+        waitingJobs.clear()
         locked = false
       }
       else {
@@ -125,61 +118,116 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
           val editor = it.key.editor
           printCodeAnalyzerStatistic(editor)
           printFileStatusMapInfo(editor)
-          printEditorInfo(editor)
         }
-        LOG.info("Highlighting still in progress: ${sessions.keys.joinToString(separator = ",\n") { it.description }}")
+        LOG.info("Highlighting still in progress: ${sessions.keys.joinToString(separator = ",\n") { it.description }},\n" +
+                 "files ${filesYetToStartHighlighting.keys.joinToString(separator = ",\n") { it.name }}")
       }
     }
   }
 
-  fun waitAnalysisToFinish(timeout: Duration = 5.minutes, throws: Boolean = false) {
+  /**
+   * @throws TimeoutException when stopped due to provided [timeout]
+   */
+  suspend fun waitAnalysisToFinish(timeout: Duration? = 5.minutes, throws: Boolean = false) {
     LOG.info("Waiting for code analysis to finish in $timeout")
+    val future = CompletableFuture<Unit>()
+    if (timeout != null) {
+      future.orTimeout(timeout.inWholeMilliseconds, TimeUnit.MILLISECONDS)
+    }
+    coroutineScope {
+      launch {
+        while (true) {
+          @Suppress("TestOnlyProblems")
+          if (!service<FUSProjectHotStartUpMeasurerService>().isHandlingFinished() && !future.isDone) {
+            delay(500)
+          }
+          else {
+            break
+          }
+        }
+
+        if (future.isDone) {
+          return@launch
+        }
+
+        // WaitForFinishedCodeAnalysisFileEditorListener.fileOpenedSync works on EDT,
+        // so this is to ensure the reopened editor from startup would be caught by the listener before we ask ListenerState to wait
+        withContext(Dispatchers.EDT) {
+          // do nothing
+        }
+
+        if (!future.isDone) {
+          registerToWaitForAnalysisToFinish(future)
+        }
+      }
+    }
+
+    try {
+      future.join()
+    }
+    catch (e: CancellationException) {
+      throw e
+    }
+    catch (_: CompletionException) {
+      val errorText = "Waiting for highlight to finish took more than $timeout."
+      LOG.error(errorText)
+      if (throws) {
+        throw TimeoutException(errorText)
+      }
+    }
+    LOG.info("Code analysis waiting finished")
+  }
+
+  private fun registerToWaitForAnalysisToFinish(future: CompletableFuture<Unit>) {
     if (LightEdit.owns(project)) {
+      future.complete(Unit)
       return
     }
-    if (highlightingFinishedEverywhere.tryAcquire(timeout.inWholeSeconds, TimeUnit.SECONDS)) {
-      highlightingFinishedEverywhere.release()
+    if (!future.isDone) {
+      registerWaiter(future)
     }
-    else {
-      val errorText = "Waiting for highlight to finish took more than $timeout."
-      if (throws) {
-        LOG.error(errorText)
-        throw TimeoutException(errorText)
-      } else {
-        LOG.error(errorText)
-      }
-    }
-    LOG.info("Code analysis finished")
   }
 
-  fun registerOpenedEditors(openedEditors: List<TextEditor>) {
+  private fun registerWaiter(future: CompletableFuture<Unit>) {
+    synchronized(stateLock) {
+      if (!locked) {
+        future.complete(Unit)
+      }
+      else {
+        waitingJobs.add(future)
+      }
+    }
+  }
+
+  internal fun registerOpenedEditors(openedEditors: List<TextEditor>) {
     val listener = SimpleEditedDocumentsListener(project)
     synchronized(stateLock) {
-      for (fileEditor in openedEditors.getWorthy()) {
-        sessions[fileEditor] = ExceptionWithTime.createForOpenedEditor(fileEditor)
+      for (fileEditor in openedEditors) {
+        filesYetToStartHighlighting.put(fileEditor.file, Unit)
         fileEditor.editor.document.addDocumentListener(listener, fileEditor)
       }
       ensureLockedIfNeeded()
     }
   }
 
-  fun registerEditedDocuments(textEditors: List<TextEditor>) {
+  internal fun registerFileToHighlight(file: VirtualFile) {
+    val hasWorthyEditor = FileEditorManager.getInstance(project).getEditorList(file).getWorthy().any { UIUtil.isShowing(it.editor.component) }
+    if (!hasWorthyEditor) return
     synchronized(stateLock) {
-      for (fileEditor in textEditors.getWorthy()) {
-        sessions[fileEditor] = ExceptionWithTime.createForEditedEditor(fileEditor)
-      }
+      filesYetToStartHighlighting.put(file, Unit)
       ensureLockedIfNeeded()
     }
   }
 
-  fun registerAnalysisStarted(fileEditors: Collection<TextEditor>) {
+  fun registerDaemonStarted(fileEditors: Collection<TextEditor>) {
     val errors = mutableListOf<AssertionError>()
     val isStartedInDumbMode = runReadAction { DumbService.isDumb(project) }
     synchronized(stateLock) {
       for (editor in fileEditors) {
-        LOG.info("daemon starting for ${editor.description}")
+        LOG.info("Daemon starting for ${editor.description}")
         val previousSessionStartTrace = sessions.put(editor, ExceptionWithTime.createForAnalysisStart(editor, isStartedInDumbMode))
         ExceptionWithTime.createIntersectionErrorIfNeeded(editor, previousSessionStartTrace)?.let { errors.add(it) }
+        filesYetToStartHighlighting.remove(editor.file)
       }
       ensureLockedIfNeeded()
     }
@@ -216,23 +264,23 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
       @RequiresReadLock
       fun create(editor: TextEditor, project: Project, isCancelled: Boolean, isFinishedInDumbMode: Boolean): HighlightedEditor {
         if (!UIUtil.isShowing(editor.getComponent())) {
-          LOG.info("Invisible editor ${editor.description}")
+          LOG.info("Creating invisible editor ${editor.description}")
           return InvisibleEditor(editor)
         }
         else if (isFinishedInDumbMode || isCancelled) {
-          LOG.info("Unfinished editor isFinishedInDumbMode=$isFinishedInDumbMode, isCancelled=$isCancelled ${editor.description}")
+          LOG.info("Creating unfinished editor isFinishedInDumbMode=$isFinishedInDumbMode, isCancelled=$isCancelled ${editor.description}")
           return IncompletelyHighlightedEditor(editor)
         }
         else {
           val isHighlighted = DaemonCodeAnalyzerImpl.isHighlightingCompleted(editor, project)
-          LOG.info("Visible editor ${editor.description}\nisHighlighted $isHighlighted")
+          LOG.info("Creating visible editor ${editor.description}\nisHighlighted $isHighlighted")
           return VisibleEditor(editor, isHighlighted)
         }
       }
     }
   }
 
-  internal fun registerAnalysisFinished(highlightedEditors: Map<TextEditor, HighlightedEditor>) {
+  internal fun registerDaemonFinishedOrCancelled(highlightedEditors: Map<TextEditor, HighlightedEditor>, status: String, traceId: UUID) {
     val currentTime = System.currentTimeMillis()
     synchronized(stateLock) {
       val iterator = sessions.entries.iterator()
@@ -246,15 +294,13 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
         }
         else {
           val shouldWait = highlightedEditor.shouldWaitForNextHighlighting || exceptionWithTime.wasStartedInLimitedSetup
-          LOG.info("daemon stopped for ${highlightedEditor.editor.description}, " +
-                   "shouldWaitForHighlighting=${shouldWait}, " +
-                   "editor.shouldWaitForNextHighlighting=${highlightedEditor.shouldWaitForNextHighlighting}")
-          LOG.info("""daemon stopped for ${highlightedEditor.editor.description}, 
-                   shouldWaitForHighlighting=${shouldWait},
-                   highlightedEditor.shouldWaitForNextHighlighting=${highlightedEditor.shouldWaitForNextHighlighting} 
-                  """
-                     .trimIndent()
-          )
+          LOG.info(""" 
+            Registering daemon finished or cancelled for:
+              daemon $status for ${highlightedEditor.editor.description},
+              shouldWaitForHighlighting = ${shouldWait},
+              shouldWaitForNextHighlighting = ${highlightedEditor.shouldWaitForNextHighlighting},
+              traceId = $traceId
+        """.trimIndent())
           if (shouldWait) {
             ExceptionWithTime.markAnalysisFinished(exceptionWithTime)
           }
@@ -264,18 +310,33 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
           }
         }
       }
+
+      if (!filesYetToStartHighlighting.isEmpty()) {
+        val fileEditorManager = FileEditorManager.getInstance(project)
+        val filesIterator = filesYetToStartHighlighting.entries.iterator()
+        while (filesIterator.hasNext()) {
+          val (file, _) = filesIterator.next()
+          val hasWorthyEditor = fileEditorManager.getEditors(file).toMutableList().getWorthy().any { UIUtil.isShowing(it.editor.getComponent()) }
+          if (!hasWorthyEditor) {
+            filesIterator.remove()
+          }
+        }
+      }
+
       unlockIfNeeded()
     }
   }
 
   private fun printCodeAnalyzerStatistic(editor: Editor) {
+    //Status can't be retrieved from EDT
+    if (EDT.isCurrentThreadEdt()) return
     try {
       ReadAction.run<Throwable> {
         LOG.info("Analyzer status for ${editor.virtualFile.path}\n ${TrafficLightRenderer(project, editor.document).use { it.daemonCodeAnalyzerStatus }}")
       }
     }
-    catch (_: Throwable) {
-      LOG.warn("Print Analyzer status failed")
+    catch (ex: Throwable) {
+      LOG.warn("Print Analyzer status failed", ex)
     }
   }
 
@@ -286,20 +347,8 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
         .toString(editor.document)
       LOG.info("File status map $fileStatus")
     }
-    catch (_: Throwable) {
-      LOG.warn("Print Analyzer status map failed")
-    }
-  }
-
-  internal fun printEditorInfo(editor: Editor) {
-    try {
-      LOG.info("""
-        Editor document ${editor.virtualFile.path}
-            document is in bulkUpdate ${editor.document.isInBulkUpdate}
-      """.trimIndent());
-    }
-    catch (_: Throwable) {
-      LOG.warn("Print editor info failed")
+    catch (ex: Throwable) {
+      LOG.warn("Print Analyzer status map failed", ex)
     }
   }
 
@@ -308,10 +357,7 @@ class CodeAnalysisStateListener(val project: Project, val cs: CoroutineScope) {
 private class SimpleEditedDocumentsListener(private val project: Project) : BulkAwareDocumentListener.Simple {
   override fun beforeDocumentChangeNonBulk(event: DocumentEvent) {
     val file = FileDocumentManager.getInstance().getFile(event.document) ?: return
-
-    val worthy = FileEditorManager.getInstance(project).getEditorList(file).getWorthy()
-    if (worthy.isEmpty()) return
-    project.service<CodeAnalysisStateListener>().registerEditedDocuments(worthy)
+    project.service<CodeAnalysisStateListener>().registerFileToHighlight(file)
   }
 }
 
@@ -323,23 +369,27 @@ internal class WaitForFinishedCodeAnalysisListener(private val project: Project)
   }
 
   override fun daemonStarting(fileEditors: Collection<FileEditor>) {
-    CodeAnalysisStateListener.LOG.info("daemon starting with ${fileEditors.size} unfiltered editors: " +
+    CodeAnalysisStateListener.LOG.info("Daemon starting with ${fileEditors.size} unfiltered editors: " +
                                        fileEditors.joinToString(separator = "\n") { it.description })
-    project.service<CodeAnalysisStateListener>().registerAnalysisStarted(fileEditors.getWorthy())
+    project.service<CodeAnalysisStateListener>().registerDaemonStarted(fileEditors.getWorthy())
   }
 
   override fun daemonCanceled(reason: String, fileEditors: Collection<FileEditor>) {
-    CodeAnalysisStateListener.LOG.info("daemon canceled by the reason of '$reason'")
-    daemonStopped(fileEditors, true)
+    val traceId = UUID.randomUUID()
+    CodeAnalysisStateListener.LOG.info("Daemon canceled by the reason of '$reason', traceId = $traceId")
+    daemonFinishedOrCancelled(fileEditors, true, traceId)
   }
 
   override fun daemonFinished(fileEditors: Collection<FileEditor>) {
-    daemonStopped(fileEditors, false)
+    val traceId = UUID.randomUUID()
+    CodeAnalysisStateListener.LOG.info("Daemon finished, traceId = $traceId")
+    daemonFinishedOrCancelled(fileEditors, false, traceId)
   }
 
-  private fun daemonStopped(fileEditors: Collection<FileEditor>, isCancelled: Boolean) {
+  private fun daemonFinishedOrCancelled(fileEditors: Collection<FileEditor>, isCancelled: Boolean, traceId: UUID) {
     val status = if (isCancelled) "cancelled" else "stopped"
-    CodeAnalysisStateListener.LOG.info("daemon $status with ${fileEditors.size} unfiltered editors")
+    printFileEditors(fileEditors, status, traceId)
+
     val worthy = fileEditors.getWorthy()
     if (worthy.isEmpty()) return
 
@@ -348,8 +398,19 @@ internal class WaitForFinishedCodeAnalysisListener(private val project: Project)
       worthy.associateWith { CodeAnalysisStateListener.HighlightedEditor.create(it, project, isCancelled = isCancelled, isFinishedInDumbMode = isFinishedInDumbMode) }
     }
 
-    project.service<CodeAnalysisStateListener>().registerAnalysisFinished(highlightedEditors)
+    project.service<CodeAnalysisStateListener>().registerDaemonFinishedOrCancelled(highlightedEditors, status, traceId)
   }
+
+  fun printFileEditors(fileEditors: Collection<FileEditor>, status: String, traceId: UUID) {
+    try {
+      CodeAnalysisStateListener.LOG.info("Daemon $status with ${fileEditors.size} unfiltered editors, traceId = $traceId")
+      val editorsMessage = fileEditors.map { fileEditor -> fileEditor.description }.joinToString(separator = "\n")
+      CodeAnalysisStateListener.LOG.info("Editors to finish\n$editorsMessage")
+    }
+    catch (_: Exception) {
+    }
+  }
+
 }
 
 internal class WaitForFinishedCodeAnalysisFileEditorListener : FileOpenedSyncListener {
@@ -380,24 +441,6 @@ private sealed class ExceptionWithTime(override val message: String?) : Exceptio
       fun isNotFinished() = !analysisFinished
     }
 
-    private class EditorOpened(editor: TextEditor) : ExceptionWithTime(message = "Previous editor opening trace (editor = ${editor.description})") {
-      override val wasStartedInLimitedSetup: Boolean
-        get() = true //because it's unknown
-    }
-
-    private class EditorEdited(editor: TextEditor) : ExceptionWithTime(message = "Previous editor edited trace (editor = ${editor.description})") {
-      override val wasStartedInLimitedSetup: Boolean
-        get() = true //because it's unknown
-    }
-
-    fun createForOpenedEditor(editor: TextEditor): ExceptionWithTime {
-      return EditorOpened(editor)
-    }
-
-    fun createForEditedEditor(fileEditor: TextEditor): ExceptionWithTime {
-      return EditorEdited(fileEditor)
-    }
-
     fun createForAnalysisStart(editor: TextEditor, isStartedInDumbMode: Boolean): ExceptionWithTime {
       return DaemonAnalysisStarted(editor, isStartedInDumbMode)
     }
@@ -417,10 +460,6 @@ private sealed class ExceptionWithTime(override val message: String?) : Exceptio
             .end(currentTime, TimeUnit.MILLISECONDS)
           "Total highlighting time is : ${currentTime - exceptionWithTime.timestamp} ms for ${editor.description}"
         }
-        is EditorOpened -> "Total time from opening to highlighting is : ${currentTime - exceptionWithTime.timestamp} ms; \n" +
-                           "daemon start was not reported for editor ${editor.description}"
-        is EditorEdited -> "Total time from editing to highlighting is : ${currentTime - exceptionWithTime.timestamp} ms; \n" +
-                           "daemon start was not reported for editor ${editor.description}"
       }
     }
 

@@ -47,7 +47,6 @@ f:com.intellij.openapi.actionSystem.CompositeDataProvider
 com.intellij.openapi.actionSystem.DataContext
 - sf:EMPTY_CONTEXT:com.intellij.openapi.actionSystem.DataContext
 - F:getData(com.intellij.openapi.actionSystem.DataKey):java.lang.Object
-- a:getData(java.lang.String):java.lang.Object
 f:com.intellij.openapi.actionSystem.DataKey
 - com.intellij.openapi.util.ValueKey
 - sf:Companion:com.intellij.openapi.actionSystem.DataKey$Companion
@@ -64,6 +63,7 @@ com.intellij.openapi.actionSystem.DataSink
 - sf:Companion:com.intellij.openapi.actionSystem.DataSink$Companion
 - a:dataSnapshot(com.intellij.openapi.actionSystem.DataSnapshotProvider):V
 - a:lazy(com.intellij.openapi.actionSystem.DataKey,kotlin.jvm.functions.Function0):V
+- a:lazyNull(com.intellij.openapi.actionSystem.DataKey):V
 - a:set(com.intellij.openapi.actionSystem.DataKey,java.lang.Object):V
 - a:setNull(com.intellij.openapi.actionSystem.DataKey):V
 - a:uiDataSnapshot(com.intellij.openapi.actionSystem.DataProvider):V
@@ -86,7 +86,11 @@ com.intellij.openapi.actionSystem.UiCompatibleDataProvider
 - com.intellij.openapi.actionSystem.UiDataProvider
 - getData(java.lang.String):java.lang.Object
 com.intellij.openapi.actionSystem.UiDataProvider
+- sf:Companion:com.intellij.openapi.actionSystem.UiDataProvider$Companion
 - a:uiDataSnapshot(com.intellij.openapi.actionSystem.DataSink):V
+- s:wrapComponent(javax.swing.JComponent,com.intellij.openapi.actionSystem.UiDataProvider):javax.swing.JComponent
+f:com.intellij.openapi.actionSystem.UiDataProvider$Companion
+- f:wrapComponent(javax.swing.JComponent,com.intellij.openapi.actionSystem.UiDataProvider):javax.swing.JComponent
 com.intellij.openapi.actionSystem.UiDataRule
 - s:forEachRule(java.util.function.Consumer):V
 - a:uiDataSnapshot(com.intellij.openapi.actionSystem.DataSink,com.intellij.openapi.actionSystem.DataSnapshot):V

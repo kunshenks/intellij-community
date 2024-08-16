@@ -5,11 +5,13 @@ import com.intellij.ide.DataManager
 import com.intellij.ide.actions.DeleteAction
 import com.intellij.ide.projectView.ProjectView
 import com.intellij.maven.testFramework.MavenMultiVersionImportingTestCase
+import com.intellij.openapi.actionSystem.CustomizedDataContext
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.actionSystem.LangDataKeys
 import com.intellij.openapi.actionSystem.PlatformDataKeys
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.writeAction
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.module.Module
 import com.intellij.openapi.module.ModuleManager
 import com.intellij.openapi.roots.LibraryOrderEntry
@@ -400,7 +402,9 @@ class MavenProjectsManagerTest : MavenMultiVersionImportingTestCase() {
     configConfirmationForYesAnswer()
     val action = DeleteAction()
     withContext(Dispatchers.EDT) {
-      action.actionPerformed(TestActionEvent.createTestEvent(action, createTestModuleDataContext(module1)))
+      writeIntentReadAction {
+        action.actionPerformed(TestActionEvent.createTestEvent(action, createTestModuleDataContext(module1)))
+      }
     }
     updateAllProjects()
     assertModuleModuleDeps("m2")
@@ -588,7 +592,9 @@ class MavenProjectsManagerTest : MavenMultiVersionImportingTestCase() {
     val action = RemoveManagedFilesAction()
     waitForImportWithinTimeout {
       withContext(Dispatchers.EDT) {
-        action.actionPerformed(TestActionEvent.createTestEvent(action, createTestDataContext(mavenParentPom)))
+        writeIntentReadAction {
+          action.actionPerformed(TestActionEvent.createTestEvent(action, createTestDataContext(mavenParentPom)))
+        }
       }
     }
     assertEquals(1, ModuleManager.getInstance(project).modules.size)
@@ -725,17 +731,10 @@ class MavenProjectsManagerTest : MavenMultiVersionImportingTestCase() {
   companion object {
     private fun createTestModuleDataContext(vararg modules: Module): DataContext {
       val defaultContext = DataManager.getInstance().getDataContext()
-      return DataContext { dataId: String? ->
-        if (LangDataKeys.MODULE_CONTEXT_ARRAY.`is`(dataId)) {
-          return@DataContext modules
-        }
-        if (ProjectView.UNLOADED_MODULES_CONTEXT_KEY.`is`(dataId)) {
-          return@DataContext listOf<Any>() // UnloadedModuleDescription
-        }
-        if (PlatformDataKeys.DELETE_ELEMENT_PROVIDER.`is`(dataId)) {
-          return@DataContext MavenModuleDeleteProvider()
-        }
-        defaultContext.getData(dataId!!)
+      return CustomizedDataContext.withSnapshot(defaultContext) { sink ->
+        sink[LangDataKeys.MODULE_CONTEXT_ARRAY] = modules
+        sink[ProjectView.UNLOADED_MODULES_CONTEXT_KEY] = listOf() // UnloadedModuleDescription
+        sink[PlatformDataKeys.DELETE_ELEMENT_PROVIDER] = MavenModuleDeleteProvider()
       }
     }
   }

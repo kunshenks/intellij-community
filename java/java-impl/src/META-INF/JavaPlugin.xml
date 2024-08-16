@@ -371,6 +371,9 @@
 
     <extensionPoint qualifiedName="com.intellij.openapi.projectRoots.externalJavaConfigurationProvider"
                     interface="com.intellij.openapi.projectRoots.impl.ExternalJavaConfigurationProvider" dynamic="true"/>
+
+    <extensionPoint qualifiedName="com.intellij.gotoByName.defaultProvider.ignoreLanguage" dynamic="true"
+                    beanClass="com.intellij.ide.util.gotoByName.IgnoreLanguageInDefaultProvider"/>
   </extensionPoints>
 
   <extensions defaultExtensionNs="com.intellij">
@@ -929,6 +932,7 @@
     <xdebugger.breakpointType implementation="com.intellij.debugger.ui.breakpoints.JavaFieldBreakpointType"/>
     <xdebugger.breakpointType implementation="com.intellij.debugger.ui.breakpoints.JavaExceptionBreakpointType"/>
     <xdebugger.breakpointType implementation="com.intellij.debugger.ui.breakpoints.JavaLineBreakpointType"/>
+    <xdebugger.hotSwapUiExtension implementation="com.intellij.debugger.impl.hotswap.JvmHotSwapUiExtension"/>
     <debugger.jvmSmartStepIntoHandler implementation="com.intellij.debugger.actions.JavaSmartStepIntoHandler" order="last"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.debugger.ui.breakpoints.JavaBreakpointsUsageCollector"/>
     <debugger.simplePropertyGetterProvider implementation="com.intellij.debugger.engine.JavaSimpleGetterProvider"/>
@@ -1149,6 +1153,7 @@
     <filePasteProvider implementation="com.intellij.ide.JavaFilePasteProvider" order="before fileList"/>
     <enterHandlerDelegate implementation="com.intellij.javadoc.EnterInJavadocParamDescriptionHandler"/>
     <enterHandlerDelegate implementation="com.intellij.javadoc.JavadocSnippetEnterHandler" order="before EnterBetweenBracesHandler"/>
+    <enterHandlerDelegate implementation="com.intellij.javadoc.JavaDocMarkdownEnterHandler" order="after EnterInLineCommentHandler" />
     <editorNavigation implementation="com.intellij.javadoc.JavadocNavigationDelegate"/>
     <methodNavigationOffsetProvider implementation="com.intellij.codeInsight.navigation.JavaMethodNavigationOffsetProvider"/>
     <dom.customAnnotationChecker implementation="com.intellij.util.xml.impl.ExtendsClassChecker"/>
@@ -2810,6 +2815,7 @@
     <postStartupActivity implementation="com.intellij.ide.FileNotInSourceRootChecker"/>
 
     <virtualFileCustomDataProvider implementation="com.intellij.openapi.roots.impl.JavaLangLevelVirtualFileCustomDataProvider"/>
+    <virtualFileCustomDataProvider implementation="com.intellij.openapi.roots.impl.JavaClassVirtualFileCustomDataProvider"/>
 
     <spellchecker.dictionary.checker implementation="com.intellij.java.frameworks.MavenDictionaryChecker"/>
 

@@ -6,14 +6,12 @@ import com.intellij.icons.AllIcons;
 import com.intellij.ide.DataManager;
 import com.intellij.ide.ui.UISettings;
 import com.intellij.ide.ui.customization.CustomizationUtil;
+import com.intellij.internal.inspector.UiInspectorActionUtil;
 import com.intellij.internal.inspector.UiInspectorUtil;
 import com.intellij.internal.statistic.collectors.fus.ui.persistence.ToolbarClicksCollector;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
-import com.intellij.openapi.actionSystem.ex.ActionButtonLook;
-import com.intellij.openapi.actionSystem.ex.ActionManagerEx;
-import com.intellij.openapi.actionSystem.ex.AnActionListener;
-import com.intellij.openapi.actionSystem.ex.CustomComponentAction;
+import com.intellij.openapi.actionSystem.ex.*;
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy;
 import com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutUtilKt;
 import com.intellij.openapi.application.ApplicationManager;
@@ -177,8 +175,6 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
 
   private @NotNull Function<? super String, ? extends Component> mySeparatorCreator = (name) -> new MySeparator(name);
 
-  private @Nullable DataProvider myAdditionalDataProvider = null;
-
   private boolean myNeedCheckHoverOnLayout = false;
 
   public ActionToolbarImpl(@NotNull String place, @NotNull ActionGroup actionGroup, boolean horizontal) {
@@ -248,7 +244,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
     setMiniModeInner(false);
 
     installPopupHandler(customizable, null, null);
-    UiInspectorUtil.registerProvider(this, () -> UiInspectorUtil.collectActionGroupInfo(
+    UiInspectorUtil.registerProvider(this, () -> UiInspectorActionUtil.collectActionGroupInfo(
       "Toolbar", myActionGroup, myPlace, myPresentationFactory));
   }
 
@@ -581,7 +577,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
                                                       @NotNull Presentation presentation,
                                                       Supplier<? extends @NotNull Dimension> minimumSize) {
     ActionButton actionButton;
-    if (action.displayTextInToolbar()) {
+    if (Boolean.TRUE.equals(presentation.getClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR))) {
       actionButton = createTextButton(action, place, presentation, minimumSize);
     }
     else {
@@ -1088,7 +1084,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
     boolean fullReset = newVisibleActions.isEmpty() || myVisibleActions.isEmpty();
     myVisibleActions = newVisibleActions;
 
-    boolean skipSizeAdjustments = mySkipWindowAdjustments;
+    boolean skipSizeAdjustments = mySkipWindowAdjustments || skipSizeAdjustments();
     Component compForSize = guessBestParentForSizeAdjustment();
     Dimension oldSize = skipSizeAdjustments ? null : compForSize.getPreferredSize();
 
@@ -1141,6 +1137,11 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
       button.validate();
     }
     return true;
+  }
+
+  // don't call getPreferredSize for "best parent" if it isn't popup or lightweight hint
+  private boolean skipSizeAdjustments() {
+    return PopupUtil.getPopupContainerFor(this) == null && getParentLightweightHintComponent(this) == null;
   }
 
   private void adjustContainerWindowSize(boolean fullReset,
@@ -1258,13 +1259,7 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
                "Please call toolbar.setTargetComponent() explicitly.", myCreationTrace);
     }
     Component target = myTargetComponent != null ? myTargetComponent : IJSwingUtilities.getFocusedComponentInWindowOrSelf(this);
-    DataContext context = DataManager.getInstance().getDataContext(target);
-    if (myAdditionalDataProvider != null) {
-      return CustomizedDataContext.withProvider(context, myAdditionalDataProvider);
-    }
-    else {
-      return context;
-    }
+    return DataManager.getInstance().getDataContext(target);
   }
 
   @Override
@@ -1670,11 +1665,6 @@ public class ActionToolbarImpl extends JPanel implements ActionToolbar, QuickAct
     }
 
     return accessibleContext;
-  }
-
-  @ApiStatus.Internal
-  public void setAdditionalDataProvider(@Nullable DataProvider additionalDataProvider) {
-    myAdditionalDataProvider = additionalDataProvider;
   }
 
   @ApiStatus.Internal

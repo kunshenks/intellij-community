@@ -5604,6 +5604,16 @@ public abstract class K1QuickFixTestGenerated extends AbstractK1QuickFixTest {
                         runTest("testData/quickfix/createFromUsage/createFunction/call/member/funWithNullableTypeParameter.kt");
                     }
 
+                    @TestMetadata("implicitThisInLocalClassWithTypeParameterFromExtensionParent.kt")
+                    public void testImplicitThisInLocalClassWithTypeParameterFromExtensionParent() throws Exception {
+                        runTest("testData/quickfix/createFromUsage/createFunction/call/member/implicitThisInLocalClassWithTypeParameterFromExtensionParent.kt");
+                    }
+
+                    @TestMetadata("implicitThisInNestedClassWithTypeParameterFromParent.kt")
+                    public void testImplicitThisInNestedClassWithTypeParameterFromParent() throws Exception {
+                        runTest("testData/quickfix/createFromUsage/createFunction/call/member/implicitThisInNestedClassWithTypeParameterFromParent.kt");
+                    }
+
                     @TestMetadata("inconsistentTypes.kt")
                     public void testInconsistentTypes() throws Exception {
                         runTest("testData/quickfix/createFromUsage/createFunction/call/member/inconsistentTypes.kt");
@@ -7589,9 +7599,29 @@ public abstract class K1QuickFixTestGenerated extends AbstractK1QuickFixTest {
             KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
         }
 
+        @TestMetadata("exposedConstructorParameterType.kt")
+        public void testExposedConstructorParameterType() throws Exception {
+            runTest("testData/quickfix/decreaseVisibility/exposedConstructorParameterType.kt");
+        }
+
+        @TestMetadata("exposedConstructorParameterType_privateVal.kt")
+        public void testExposedConstructorParameterType_privateVal() throws Exception {
+            runTest("testData/quickfix/decreaseVisibility/exposedConstructorParameterType_privateVal.kt");
+        }
+
+        @TestMetadata("exposedConstructorParameterType_val.kt")
+        public void testExposedConstructorParameterType_val() throws Exception {
+            runTest("testData/quickfix/decreaseVisibility/exposedConstructorParameterType_val.kt");
+        }
+
         @TestMetadata("exposedParameterType.kt")
         public void testExposedParameterType() throws Exception {
             runTest("testData/quickfix/decreaseVisibility/exposedParameterType.kt");
+        }
+
+        @TestMetadata("exposedParameterType_privateType.kt")
+        public void testExposedParameterType_privateType() throws Exception {
+            runTest("testData/quickfix/decreaseVisibility/exposedParameterType_privateType.kt");
         }
 
         @TestMetadata("exposedPropertyType.kt")
@@ -9770,6 +9800,11 @@ public abstract class K1QuickFixTestGenerated extends AbstractK1QuickFixTest {
         @TestMetadata("manyImplMemberNotImplemented.kt")
         public void testManyImplMemberNotImplemented() throws Exception {
             runTest("testData/quickfix/implement/manyImplMemberNotImplemented.kt");
+        }
+
+        @TestMetadata("manyInterfacesMemberNotImplemented.kt")
+        public void testManyInterfacesMemberNotImplemented() throws Exception {
+            runTest("testData/quickfix/implement/manyInterfacesMemberNotImplemented.kt");
         }
 
         @TestMetadata("nested.kt")
@@ -15817,6 +15852,11 @@ public abstract class K1QuickFixTestGenerated extends AbstractK1QuickFixTest {
         @TestMetadata("typeWith1Argument.kt")
         public void testTypeWith1Argument() throws Exception {
             runTest("testData/quickfix/superTypeIsExtensionType/typeWith1Argument.kt");
+        }
+
+        @TestMetadata("typeWithAnnotations.kt")
+        public void testTypeWithAnnotations() throws Exception {
+            runTest("testData/quickfix/superTypeIsExtensionType/typeWithAnnotations.kt");
         }
 
         @TestMetadata("typeWithNoArgument.kt")

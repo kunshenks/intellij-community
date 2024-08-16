@@ -2,6 +2,7 @@
 package com.intellij.openapi.wm.impl
 
 import com.intellij.diagnostic.LoadingState
+import com.intellij.ide.ui.UISettings
 import com.intellij.ide.ui.UISettings.Companion.setupAntialiasing
 import com.intellij.openapi.actionSystem.DataSink
 import com.intellij.openapi.actionSystem.UiDataProvider
@@ -12,6 +13,7 @@ import com.intellij.openapi.wm.IdeFrame
 import com.intellij.openapi.wm.StatusBar
 import com.intellij.openapi.wm.impl.FrameInfoHelper.Companion.isMaximized
 import com.intellij.openapi.wm.impl.ProjectFrameHelper.Companion.getFrameHelper
+import com.intellij.openapi.wm.impl.customFrameDecorations.header.CustomWindowHeaderUtil.hideNativeLinuxTitle
 import com.intellij.platform.ide.diagnostic.startUpPerformanceReporter.FUSProjectHotStartUpMeasurer
 import com.intellij.ui.BalloonLayout
 import com.intellij.ui.DisposableWindow
@@ -21,12 +23,17 @@ import com.intellij.util.ui.EdtInvocationManager
 import com.intellij.util.ui.JBInsets
 import org.jetbrains.annotations.ApiStatus
 import org.jetbrains.annotations.Nls
-import java.awt.*
+import java.awt.Graphics
+import java.awt.Insets
+import java.awt.Rectangle
+import java.awt.Window
 import java.awt.event.ComponentAdapter
 import java.awt.event.ComponentEvent
 import javax.accessibility.AccessibleContext
 import javax.swing.JComponent
 import javax.swing.JFrame
+import javax.swing.JFrame.NORMAL
+import javax.swing.JFrame.getFrames
 import javax.swing.JRootPane
 import javax.swing.SwingUtilities
 
@@ -56,8 +63,11 @@ class IdeFrameImpl : JFrame(), IdeFrame, UiDataProvider, DisposableWindow {
   @JvmField
   internal var togglingFullScreenInProgress: Boolean = false
 
+  internal var lastInactiveMouseXAbs: Int = 0
+  internal var lastInactiveMouseYAbs: Int = 0
+  internal var isFirstMousePressed: Boolean = false
   @ApiStatus.Internal
-  var mouseReleaseCountSinceLastActivated = 0
+  var wasJustActivatedByClick: Boolean = false
 
   private var isDisposed = false
 
@@ -120,7 +130,7 @@ class IdeFrameImpl : JFrame(), IdeFrame, UiDataProvider, DisposableWindow {
   @Suppress("OVERRIDE_DEPRECATION")
   override fun show() {
     isDisposed = false
-    if (IdeRootPane.hideNativeLinuxTitle && !isUndecorated) {
+    if (hideNativeLinuxTitle(UISettings.shadowInstance) && !isUndecorated) {
       isUndecorated = true
     }
     @Suppress("DEPRECATION")

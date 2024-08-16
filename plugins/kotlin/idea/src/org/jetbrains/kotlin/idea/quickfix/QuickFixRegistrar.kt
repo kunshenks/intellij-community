@@ -31,7 +31,7 @@ import org.jetbrains.kotlin.idea.quickfix.migration.MigrateExternalExtensionFix
 import org.jetbrains.kotlin.idea.quickfix.migration.MigrateTypeParameterListFix
 import org.jetbrains.kotlin.idea.quickfix.replaceWith.DeprecatedSymbolUsageFix
 import org.jetbrains.kotlin.idea.quickfix.replaceWith.DeprecatedSymbolUsageInWholeProjectFix
-import org.jetbrains.kotlin.idea.quickfix.replaceWith.ReplaceProtectedToPublishedApiCallFix
+import org.jetbrains.kotlin.idea.quickfix.replaceWith.ReplaceProtectedToPublishedApiCallFixFactory
 import org.jetbrains.kotlin.js.resolve.diagnostics.ErrorsJs.EXTENSION_FUNCTION_IN_EXTERNAL_DECLARATION
 import org.jetbrains.kotlin.js.resolve.diagnostics.ErrorsJs.WRONG_EXTERNAL_DECLARATION
 import org.jetbrains.kotlin.lexer.KtTokens.*
@@ -145,7 +145,6 @@ class QuickFixRegistrar : QuickFixContributor {
         PRIVATE_SETTER_FOR_OPEN_PROPERTY.registerFactory(addFinalToProperty, RemoveModifierFixBase.removeNonRedundantModifier)
         REDUNDANT_MODIFIER_IN_GETTER.registerFactory(RemoveModifierFixBase.removeRedundantModifier)
         WRONG_MODIFIER_TARGET.registerFactory(RemoveModifierFixBase.removeNonRedundantModifier, ChangeVariableMutabilityFix.CONST_VAL_FACTORY)
-        DEPRECATED_MODIFIER.registerFactory(ReplaceModifierFix)
         REDUNDANT_MODIFIER_FOR_TARGET.registerFactory(RemoveModifierFixBase.removeNonRedundantModifier)
         WRONG_MODIFIER_CONTAINING_DECLARATION.registerFactory(RemoveModifierFixBase.removeNonRedundantModifier)
         REPEATED_MODIFIER.registerFactory(RemoveModifierFixBase.removeNonRedundantModifier)
@@ -341,7 +340,7 @@ class QuickFixRegistrar : QuickFixContributor {
         UNCHECKED_CAST.registerFactory(ChangeToStarProjectionFixFactory)
         CANNOT_CHECK_FOR_ERASED.registerFactory(ChangeToStarProjectionFixFactory)
 
-        CANNOT_CHECK_FOR_ERASED.registerFactory(ConvertToIsArrayOfCallFix)
+        CANNOT_CHECK_FOR_ERASED.registerFactory(ConvertToIsArrayOfCallFixFactory)
 
         UNINITIALIZED_PARAMETER.registerFactory(ReorderParametersFix)
         UNINITIALIZED_PARAMETER_WARNING.registerFactory(ReorderParametersFix)
@@ -531,7 +530,7 @@ class QuickFixRegistrar : QuickFixContributor {
             DeprecatedSymbolUsageInWholeProjectFix,
             MigrateExternalExtensionFix
         )
-        PROTECTED_CALL_FROM_PUBLIC_INLINE.registerFactory(ReplaceProtectedToPublishedApiCallFix)
+        PROTECTED_CALL_FROM_PUBLIC_INLINE.registerFactory(ReplaceProtectedToPublishedApiCallFixFactory)
 
         POSITIONED_VALUE_ARGUMENT_FOR_JAVA_ANNOTATION.registerFactory(ReplaceJavaAnnotationPositionedArgumentsFix)
 
@@ -577,7 +576,7 @@ class QuickFixRegistrar : QuickFixContributor {
         UNRESOLVED_REFERENCE.registerFactory(MakeConstructorParameterPropertyFix)
         DELEGATED_MEMBER_HIDES_SUPERTYPE_OVERRIDE.registerFactory(SpecifyOverrideExplicitlyFix)
 
-        SUPERTYPE_IS_EXTENSION_FUNCTION_TYPE.registerFactory(ConvertExtensionToFunctionTypeFix)
+        SUPERTYPE_IS_EXTENSION_FUNCTION_TYPE.registerFactory(ConvertExtensionToFunctionTypeFixFactory)
 
         UNUSED_LAMBDA_EXPRESSION.registerFactory(AddRunToLambdaFix)
 
@@ -645,7 +644,7 @@ class QuickFixRegistrar : QuickFixContributor {
 
         ILLEGAL_INLINE_PARAMETER_MODIFIER.registerFactory(AddInlineToFunctionFix)
 
-        INAPPLICABLE_JVM_FIELD.registerFactory(ReplaceJvmFieldWithConstFix, RemoveAnnotationFix.JvmField)
+        INAPPLICABLE_JVM_FIELD.registerFactory(ReplaceJvmFieldWithConstFixFactory, RemoveAnnotationFix.JvmField)
 
         CONFLICTING_OVERLOADS.registerFactory(ChangeSuspendInHierarchyFix)
 

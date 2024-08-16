@@ -6,7 +6,6 @@ import com.intellij.codeInsight.completion.InsertionContext;
 import com.intellij.codeInsight.lookup.LookupElement;
 import com.intellij.lang.ASTNode;
 import com.intellij.openapi.command.WriteCommandAction;
-import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorModificationUtilEx;
@@ -125,19 +124,26 @@ public abstract class YamlKeyCompletionInsertHandler<T extends LookupElement> im
           }
           else if (children.length != 0 &&
                    ContainerUtil.find(children, node -> node.getElementType() == YAMLElementTypes.KEY_VALUE_PAIR) == null) {
-            String rootKey = "root";
-            String valueText = parent.getText();
-            YAMLFile file = YAMLElementGenerator.getInstance(parent.getProject())
-              .createDummyYamlWithText(rootKey + ":\n  " + valueText);
-            YAMLValue value = file.getDocuments().get(0).getTopLevelValue();
-            if (value instanceof YAMLMapping mapping) {
-              YAMLKeyValue root = mapping.getKeyValueByKey(rootKey);
-              if (root != null) {
-                substitute = root.getValue();
-              }
+            List<ASTNode> notSpaces =
+              ContainerUtil.filter(children, child -> !YAMLElementTypes.SPACE_ELEMENTS.contains(child.getElementType()));
+            if (notSpaces.size() == 1) {
+              substitute = notSpaces.get(0).getPsi();
             }
-            if (substitute == null) {
-              Logger.getInstance(YamlKeyCompletionInsertHandler.class).error("Could not substitute: " + valueText);
+            else {
+              String valueText = parent.getText();
+              YAMLFile file = YAMLElementGenerator.getInstance(parent.getProject())
+                .createDummyYamlWithText(valueText);
+              substitute = file.getDocuments().get(0).getTopLevelValue();
+              if (substitute == null) {
+                PsiElement grandParent = parent.getParent();
+                PsiElement copy = parent.copy();
+                ASTNode[] copies = copy.getNode().getChildren(null);
+                PsiElement anchor = parent.replace(copies[0].getPsi());
+                for (int i = 1; i < copies.length; i++) {
+                  anchor = grandParent.addAfter(copies[i].getPsi(), anchor);
+                }
+                return;
+              }
             }
           }
         }

@@ -541,7 +541,7 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   private static final String ATTRIBUTE_ID = "id";
   private JPanel viewContentPanel;
   private static final Comparator<AbstractProjectViewPane> PANE_WEIGHT_COMPARATOR = Comparator.comparingInt(AbstractProjectViewPane::getWeight);
-  private final MyPanel myDataProvider;
+  private final JComponent myDataProvider;
   private final SplitterProportionsData splitterProportions = new SplitterProportionsDataImpl();
   private final Map<String, Element> myUninitializedPaneState = new HashMap<>();
   private final Map<String, MySelectInTarget> mySelectInTargets = new ConcurrentHashMap<>();
@@ -558,8 +558,9 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
 
     autoScrollFromSourceHandler = new MyAutoScrollFromSourceHandler();
 
-    myDataProvider = new MyPanel();
-    myDataProvider.add(panel, BorderLayout.CENTER);
+    myDataProvider = UiDataProvider.wrapComponent(panel, sink -> uiDataSnapshot(sink));
+    ClientProperty.put(myDataProvider, UIUtil.NOT_IN_HIERARCHY_COMPONENTS, buildNotInHierarchyIterable());
+
     copyPasteDelegator = new CopyPasteDelegator(this.project, panel);
     myAutoScrollToSourceHandler = new AutoScrollToSourceHandler() {
       @Override
@@ -1377,36 +1378,30 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
     return ActionCallback.REJECTED;
   }
 
-  private final class MyPanel extends JPanel implements UiDataProvider {
-    MyPanel() {
-      super(new BorderLayout());
-      Collection<AbstractProjectViewPane> snapshot = new ArrayList<>(idToPane.values());
-      ComponentUtil.putClientProperty(this, UIUtil.NOT_IN_HIERARCHY_COMPONENTS,
-                                      (Iterable<? extends Component>)(Iterable<JComponent>)() -> JBIterable.from(snapshot)
-                                        .map(pane -> {
-                                          JComponent last = null;
-                                          for (Component c : UIUtil.uiParents(pane.getComponentToFocus(), false)) {
-                                            if (c == this || !(c instanceof JComponent)) return null;
-                                            last = (JComponent)c;
-                                          }
-                                          return last;
-                                        })
-                                        .filter(Conditions.notNull())
-                                        .iterator());
-    }
+  private @NotNull Iterable<? extends Component> buildNotInHierarchyIterable() {
+    return () -> JBIterable.from(new ArrayList<>(idToPane.values()))
+      .map(pane -> {
+        JComponent last = null;
+        for (Component c : UIUtil.uiParents(pane.getComponentToFocus(), false)) {
+          if (c == myDataProvider || !(c instanceof JComponent)) return null;
+          last = (JComponent)c;
+        }
+        return last;
+      })
+      .filter(Component.class)
+      .iterator();
+  }
 
-    @Override
-    public void uiDataSnapshot(@NotNull DataSink sink) {
-      sink.set(PlatformDataKeys.CUT_PROVIDER, copyPasteDelegator.getCutProvider());
-      sink.set(PlatformDataKeys.COPY_PROVIDER, copyPasteDelegator.getCopyProvider());
-      sink.set(PlatformDataKeys.PASTE_PROVIDER, copyPasteDelegator.getPasteProvider());
-      sink.set(LangDataKeys.IDE_VIEW, myIdeView);
-      sink.set(PlatformCoreDataKeys.HELP_ID, HelpID.PROJECT_VIEWS);
-      sink.set(QuickActionProvider.KEY, ProjectViewImpl.this);
-      AbstractProjectViewPane selectedPane = getCurrentProjectViewPane();
-      if (selectedPane != null) {
-        DataSink.uiDataSnapshot(sink, selectedPane);
-      }
+  private void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(PlatformDataKeys.CUT_PROVIDER, copyPasteDelegator.getCutProvider());
+    sink.set(PlatformDataKeys.COPY_PROVIDER, copyPasteDelegator.getCopyProvider());
+    sink.set(PlatformDataKeys.PASTE_PROVIDER, copyPasteDelegator.getPasteProvider());
+    sink.set(LangDataKeys.IDE_VIEW, myIdeView);
+    sink.set(PlatformCoreDataKeys.HELP_ID, HelpID.PROJECT_VIEWS);
+    sink.set(QuickActionProvider.KEY, ProjectViewImpl.this);
+    AbstractProjectViewPane selectedPane = getCurrentProjectViewPane();
+    if (selectedPane != null) {
+      DataSink.uiDataSnapshot(sink, selectedPane);
     }
   }
 
@@ -1865,7 +1860,15 @@ public class ProjectViewImpl extends ProjectView implements PersistentStateCompo
   }
 
   void selectOpenedFileUsingLastFocusedEditor() {
-    selectOpenedFile(getLastFocusedEditor());
+    // invokeLater is needed here to give FileEditorManagerImpl time to figure out which editor is the last focused one.
+    // If the IDE frame has just became active because the Select Opened File button was clicked,
+    // then the editor may temporarily get focus before the Project View is focused.
+    // This needs to be undone before we can select the right file.
+    // And no, there's no way to prevent that temporary focus.
+    // See com.intellij.openapi.fileEditor.impl.EditorsSplitters.MyFocusWatcher for the gore details.
+    SwingUtilities.invokeLater(() -> {
+      selectOpenedFile(getLastFocusedEditor());
+    });
   }
 
   void selectOpenedFile() {

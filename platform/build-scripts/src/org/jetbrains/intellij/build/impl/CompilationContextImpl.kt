@@ -7,8 +7,6 @@ import com.intellij.diagnostic.dumpCoroutines
 import com.intellij.diagnostic.enableCoroutineDump
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.NioFiles
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithoutActiveScope
 import com.intellij.util.PathUtilRt
 import com.intellij.util.SystemProperties
 import com.jetbrains.JBR
@@ -21,9 +19,11 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.ApiStatus.Obsolete
-import org.jetbrains.intellij.build.*
+import org.jetbrains.intellij.build.BuildMessages
+import org.jetbrains.intellij.build.BuildOptions
+import org.jetbrains.intellij.build.BuildPaths
 import org.jetbrains.intellij.build.BuildPaths.Companion.COMMUNITY_ROOT
-import org.jetbrains.intellij.build.TraceManager.spanBuilder
+import org.jetbrains.intellij.build.CompilationContext
 import org.jetbrains.intellij.build.dependencies.DependenciesProperties
 import org.jetbrains.intellij.build.dependencies.JdkDownloader
 import org.jetbrains.intellij.build.impl.JdkUtils.defineJdk
@@ -36,6 +36,11 @@ import org.jetbrains.intellij.build.impl.moduleBased.OriginalModuleRepositoryImp
 import org.jetbrains.intellij.build.io.logFreeDiskSpace
 import org.jetbrains.intellij.build.kotlin.KotlinBinaries
 import org.jetbrains.intellij.build.moduleBased.OriginalModuleRepository
+import org.jetbrains.intellij.build.telemetry.ConsoleSpanExporter
+import org.jetbrains.intellij.build.telemetry.JaegerJsonSpanExporterManager
+import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
+import org.jetbrains.intellij.build.telemetry.use
+import org.jetbrains.intellij.build.telemetry.useWithScope
 import org.jetbrains.jps.model.*
 import org.jetbrains.jps.model.artifact.JpsArtifactService
 import org.jetbrains.jps.model.java.*
@@ -165,7 +170,7 @@ class CompilationContextImpl private constructor(
       check(sequenceOf("platform/build-scripts", "bin/idea.properties", "build.txt").all {
         Files.exists(COMMUNITY_ROOT.communityRoot.resolve(it))
       }) {
-        "communityHome ($COMMUNITY_ROOT) doesn\'t point to a directory containing IntelliJ Community sources"
+        "communityHome ($COMMUNITY_ROOT) doesn't point to a directory containing IntelliJ Community sources"
       }
 
       val messages = BuildMessagesImpl.create()
@@ -300,9 +305,9 @@ class CompilationContextImpl private constructor(
 
   override fun findModule(name: String): JpsModule? = nameToModule.get(name)
 
-  override fun getModuleOutputDir(module: JpsModule): Path {
-    val url = JpsJavaExtensionService.getInstance().getOutputUrl(module, false)
-    check(url != null) {
+  override fun getModuleOutputDir(module: JpsModule, forTests: Boolean): Path {
+    val url = JpsJavaExtensionService.getInstance().getOutputUrl(/* module = */ module, /* forTests = */ forTests)
+    requireNotNull(url) {
       "Output directory for ${module.name} isn\'t set"
     }
     return Path.of(JpsPathUtil.urlToPath(url))
@@ -333,12 +338,12 @@ class CompilationContextImpl private constructor(
     return enumerator.classes().roots.map { it.absolutePath }
   }
 
-  override fun findFileInModuleSources(moduleName: String, relativePath: String): Path? {
-    return findFileInModuleSources(module = findRequiredModule(moduleName), relativePath = relativePath)
+  override fun findFileInModuleSources(moduleName: String, relativePath: String, forTests: Boolean): Path? {
+    return findFileInModuleSources(module = findRequiredModule(moduleName), relativePath = relativePath, forTests)
   }
 
-  override fun findFileInModuleSources(module: JpsModule, relativePath: String): Path? {
-    for (info in getSourceRootsWithPrefixes(module)) {
+  override fun findFileInModuleSources(module: JpsModule, relativePath: String, forTests: Boolean): Path? {
+    for (info in getSourceRootsWithPrefixes(module, forTests)) {
       if (relativePath.startsWith(info.second)) {
         val result = info.first.resolve(relativePath.removePrefix(info.second).removePrefix("/"))
         if (Files.exists(result)) {
@@ -470,7 +475,7 @@ internal fun CompilationContext.cleanOutput(keepCompilationState: Boolean = Comp
       addAll(compilationState)
     }
   }
-  spanBuilder("clean output").useWithoutActiveScope { span ->
+  spanBuilder("clean output").use { span ->
     val outDir = paths.buildOutputDir
     outputDirectoriesToKeep.forEach {
       val path = it.relativeToOrNull(outDir) ?: it
@@ -512,9 +517,9 @@ private fun printEnvironmentDebugInfo() {
   }
 }
 
-private fun getSourceRootsWithPrefixes(module: JpsModule): Sequence<Pair<Path, String>> {
+private fun getSourceRootsWithPrefixes(module: JpsModule, forTests: Boolean): Sequence<Pair<Path, String>> {
   return module.sourceRoots.asSequence()
-    .filter { JavaModuleSourceRootTypes.PRODUCTION.contains(it.rootType) }
+    .filter { forTests || JavaModuleSourceRootTypes.PRODUCTION.contains(it.rootType) }
     .map { moduleSourceRoot: JpsModuleSourceRoot ->
       val properties = moduleSourceRoot.properties
       var prefix = if (properties is JavaSourceRootProperties) {

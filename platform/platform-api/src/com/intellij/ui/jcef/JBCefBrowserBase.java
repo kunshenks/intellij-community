@@ -91,7 +91,6 @@ public abstract class JBCefBrowserBase implements JBCefDisposable {
   }
 
   private static final Logger LOG = Logger.getInstance(JBCefBrowserBase.class);
-  private static final boolean IS_REMOTE_ENABLED = JBCefApp.isRemoteEnabled();
   protected static final @NotNull String BLANK_URI = "about:blank";
   private static final @NotNull Icon ERROR_PAGE_ICON = AllIcons.General.ErrorDialog;
 
@@ -189,9 +188,10 @@ public abstract class JBCefBrowserBase implements JBCefDisposable {
         JBCefApp.checkOffScreenRenderingModeEnabled();
         CefBrowserSettings settings = new CefBrowserSettings();
         settings.windowless_frame_rate = builder.myWindowlessFrameRate;
-        cefBrowser = createOsrBrowser(ObjectUtils.notNull(builder.myOSRHandlerFactory, JBCefOSRHandlerFactory.getInstance()),
-                                      myCefClient.getCefClient(), builder.myUrl, null, null, null,
-                                      builder.myMouseWheelEventEnable, settings);
+        @NotNull JBCefOSRHandlerFactory factory = ObjectUtils.notNull(builder.myOSRHandlerFactory, JBCefOSRHandlerFactory.getInstance());
+        cefBrowser = CefOsrBrowserFactory.getInstance()
+          .createOsrBrowser(factory, myCefClient.getCefClient(), builder.myUrl, null, null, null, builder.myMouseWheelEventEnable,
+                            settings);
       }
       else {
         cefBrowser = myCefClient.getCefClient().createBrowser(validateUrl(builder.myUrl), CefRendering.DEFAULT, false, null);
@@ -346,50 +346,6 @@ public abstract class JBCefBrowserBase implements JBCefDisposable {
         return consume;
       }
     }, myCefBrowser);
-  }
-
-  private @NotNull CefBrowser createOsrBrowser(@NotNull JBCefOSRHandlerFactory factory,
-                                                             @NotNull CefClient client,
-                                                             @Nullable String url,
-                                                             @Nullable CefRequestContext context,
-                                                             // not-null parentBrowser creates a DevTools browser for it
-                                                             @Nullable CefBrowser parentBrowser,
-                                                             @Nullable Point inspectAt,
-                                                             boolean isMouseWheelEventEnabled) {
-    return createOsrBrowser(factory, client, url, context, parentBrowser, inspectAt, isMouseWheelEventEnabled, null);
-  }
-
-  private @NotNull CefBrowser createOsrBrowser(@NotNull JBCefOSRHandlerFactory factory,
-                                                             @NotNull CefClient client,
-                                                             @Nullable String url,
-                                                             @Nullable CefRequestContext context,
-                                                             // not-null parentBrowser creates a DevTools browser for it
-                                                             @Nullable CefBrowser parentBrowser,
-                                                             @Nullable Point inspectAt,
-                                                             boolean isMouseWheelEventEnabled,
-                                                             CefBrowserSettings settings) {
-    JComponent comp = factory.createComponent(isMouseWheelEventEnabled);
-    CefRenderHandler handler = factory.createCefRenderHandler(comp);
-    if (IS_REMOTE_ENABLED) {
-      CefBrowser browser = client.createBrowser(validateUrl(url), new CefRendering.CefRenderingWithHandler(handler, comp), true/*unused*/, context);
-      if (comp instanceof JBCefOsrComponent)
-        ((JBCefOsrComponent)comp).setBrowser(browser);
-      return browser;
-    }
-
-    CefBrowserOsrWithHandler browser =
-      new CefBrowserOsrWithHandler(client, validateUrl(url), context, handler, comp, parentBrowser, inspectAt, settings) {
-        @Override
-        protected CefBrowser createDevToolsBrowser(CefClient client,
-                                                   String url,
-                                                   CefRequestContext context,
-                                                   CefBrowser parent,
-                                                   Point inspectAt) {
-          return createOsrBrowser(factory, client, getUrl(), getRequestContext(), this, inspectAt, isMouseWheelEventEnabled);
-        }
-      };
-    if (comp instanceof JBCefOsrComponent) ((JBCefOsrComponent)comp).setBrowser(browser);
-    return browser;
   }
 
   /**

@@ -134,15 +134,15 @@ class Registry {
 
     @Throws(MissingResourceException::class)
     @JvmStatic
-    fun doubleValue(key: @NonNls String): Double = get(key).asDouble()
+    fun doubleValue(key: @NonNls String): Double = getInstance().resolveValue(key).asDouble()
 
     @Throws(MissingResourceException::class)
     @JvmStatic
-    fun stringValue(key: @NonNls String): String = get(key).asString()
+    fun stringValue(key: @NonNls String): String = getInstance().resolveValue(key).asString()
 
     @Throws(MissingResourceException::class)
     @JvmStatic
-    fun getColor(key: @NonNls String, defaultValue: Color?): Color? = get(key).asColor(defaultValue)
+    fun getColor(key: @NonNls String, defaultValue: Color?): Color? = getInstance().resolveValue(key).asColor(defaultValue)
 
     @Throws(IOException::class)
     private fun loadFromBundledConfig(): Map<String, String>? {
@@ -150,7 +150,7 @@ class Registry {
         return it
       }
 
-      val map: MutableMap<String, String> = LinkedHashMap(1800)
+      val map = LinkedHashMap<String, String>(1800)
       val mainFound = loadFromResource("misc/registry.properties", map)
       val overrideFound = loadFromResource("misc/registry.override.properties", map)
       if (!mainFound && !overrideFound) {
@@ -208,7 +208,7 @@ class Registry {
       val keysToProcess = HashSet(userProperties.keys)
       for ((key, value) in map) {
         val registryValue = registry.resolveValue(key)
-        val currentValue = registryValue.get(key, null, false)
+        val currentValue = registryValue.resolveNotRequiredValue(key)
         // currentValue == null means value is not in the bundle. Ignore it
         if (currentValue != null && currentValue != value) {
           registryValue.setValue(value)
@@ -259,17 +259,17 @@ class Registry {
       val keys = bundle?.keys ?: emptySet()
       val result = ArrayList<RegistryValue>()
       // don't use getInstance here - https://youtrack.jetbrains.com/issue/IDEA-271748
-      val instance = registry
-      val contributedKeys = instance.contributedKeys
+      val registry = registry
+      val contributedKeys = registry.contributedKeys
       for (key in keys) {
         if (key.endsWith(".description") || key.endsWith(".restartRequired") || contributedKeys.containsKey(key)) {
           continue
         }
-        result.add(instance.resolveValue(key))
+        result.add(registry.resolveValue(key))
       }
 
       for (key in contributedKeys.keys) {
-        result.add(instance.resolveValue(key))
+        result.add(registry.resolveValue(key))
       }
 
       return result
@@ -317,7 +317,7 @@ class Registry {
         val map = fromState(state)
         for ((key, value) in map) {
           val registryValue = registry.resolveValue(key)
-          if (registryValue.isChangedFromDefault(value, registry)) {
+          if (value != registry.getBundleValueOrNull(registryValue.key)) {
             userProperties.put(key, value)
             registryValue.resetCache()
           }
@@ -328,6 +328,7 @@ class Registry {
         // yes, earlyAccess overrides user properties
         userProperties.putAll(earlyAccess)
       }
+
       registry.isLoaded = true
       registry.loadFuture.complete(null)
       return userProperties

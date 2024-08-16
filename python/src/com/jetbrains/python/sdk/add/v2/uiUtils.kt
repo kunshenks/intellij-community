@@ -10,17 +10,12 @@ import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.observable.properties.PropertyGraph
 import com.intellij.openapi.observable.util.equalsTo
 import com.intellij.openapi.observable.util.notEqualsTo
-import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.TextFieldWithBrowseButton
-import com.intellij.openapi.ui.getUserData
-import com.intellij.openapi.ui.putUserData
 import com.intellij.openapi.ui.validation.DialogValidationRequestor
 import com.intellij.openapi.ui.validation.WHEN_PROPERTY_CHANGED
 import com.intellij.openapi.ui.validation.and
 import com.intellij.openapi.util.IconLoader
-import com.intellij.openapi.util.Key
-import com.intellij.openapi.util.NlsSafe
 import com.intellij.ui.*
 import com.intellij.ui.components.ActionLink
 import com.intellij.ui.components.fields.ExtendableTextComponent
@@ -32,9 +27,6 @@ import com.intellij.ui.dsl.builder.components.validationTooltip
 import com.intellij.ui.util.preferredHeight
 import com.jetbrains.python.PyBundle.message
 import com.jetbrains.python.psi.icons.PythonPsiApiIcons
-import com.jetbrains.python.sdk.PyDetectedSdk
-import com.jetbrains.python.sdk.PySdkSettings
-import com.jetbrains.python.sdk.PySdkToInstall
 import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMethod.CREATE_NEW
 import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMethod.SELECT_EXISTING
 import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode.CUSTOM
@@ -71,9 +63,11 @@ class PythonNewEnvironmentDialogNavigator {
   lateinit var newEnvManager: ObservableMutableProperty<PythonSupportedEnvironmentManagers>
   lateinit var existingEnvManager: ObservableMutableProperty<PythonSupportedEnvironmentManagers>
 
-  fun navigateTo(newMode: PythonInterpreterSelectionMode? = null,
-                 newMethod: PythonInterpreterSelectionMethod? = null,
-                 newManager: PythonSupportedEnvironmentManagers? = null) {
+  fun navigateTo(
+    newMode: PythonInterpreterSelectionMode? = null,
+    newMethod: PythonInterpreterSelectionMethod? = null,
+    newManager: PythonSupportedEnvironmentManagers? = null,
+  ) {
     newMode?.let { selectionMode?.set(it) }
     newMethod?.let { method ->
       selectionMethod.set(method)
@@ -114,12 +108,12 @@ class PythonNewEnvironmentDialogNavigator {
   /**
    * Loads all fields from storage ([selectionMode] is only loaded when included into `onlyAllowedSelectionModes`)
    */
-  internal fun restoreLastState(onlyAllowedSelectionModes: Collection<PythonInterpreterSelectionMode> = PythonInterpreterSelectionMode.entries.toSet()) {
+  internal fun restoreLastState(allowedInterpreterTypes: Collection<PythonInterpreterSelectionMode>) {
     val properties = PropertiesComponent.getInstance()
 
     val modeString = properties.getValue(FAV_MODE) ?: return
     val mode = PythonInterpreterSelectionMode.valueOf(modeString)
-    if (mode !in onlyAllowedSelectionModes) return
+    if (mode !in allowedInterpreterTypes) return
     selectionMode?.set(mode)
 
     if (mode == CUSTOM) {
@@ -202,9 +196,11 @@ class PythonEnvironmentComboBoxRenderer : ColoredListCellRenderer<Any>() {
   }
 }
 
-internal fun Row.pythonInterpreterComboBox(selectedSdkProperty: ObservableMutableProperty<PythonSelectableInterpreter?>, // todo not sdk
-                                           model: PythonAddInterpreterModel,
-                                           onPathSelected: (String) -> Unit, busyState: StateFlow<Boolean>? = null): Cell<PythonInterpreterComboBox> {
+internal fun Row.pythonInterpreterComboBox(
+  selectedSdkProperty: ObservableMutableProperty<PythonSelectableInterpreter?>, // todo not sdk
+  model: PythonAddInterpreterModel,
+  onPathSelected: (String) -> Unit, busyState: StateFlow<Boolean>? = null,
+): Cell<PythonInterpreterComboBox> {
 
   val comboBox = PythonInterpreterComboBox(selectedSdkProperty, model, onPathSelected)
   val cell = cell(comboBox)
@@ -229,9 +225,11 @@ internal fun Row.pythonInterpreterComboBox(selectedSdkProperty: ObservableMutabl
 
 }
 
-class PythonInterpreterComboBox(val backingProperty: ObservableMutableProperty<PythonSelectableInterpreter?>,
-                                val controller: PythonAddInterpreterModel,
-                                val onPathSelected: (String) -> Unit) : ComboBox<PythonSelectableInterpreter?>() {
+class PythonInterpreterComboBox(
+  val backingProperty: ObservableMutableProperty<PythonSelectableInterpreter?>,
+  val controller: PythonAddInterpreterModel,
+  val onPathSelected: (String) -> Unit,
+) : ComboBox<PythonSelectableInterpreter?>() {
 
   private lateinit var itemsFlow: StateFlow<List<PythonSelectableInterpreter>>
   val items: List<PythonSelectableInterpreter>
@@ -294,25 +292,6 @@ class PythonInterpreterComboBox(val backingProperty: ObservableMutableProperty<P
   }
 }
 
-private fun findPrioritySdk(sdkList: List<Sdk>): Sdk? {
-  val preferredSdkPath = PySdkSettings.instance.preferredVirtualEnvBaseSdk
-  return sdkList.firstOrNull { it.homePath == preferredSdkPath }
-         ?: sdkList.firstOrNull { it !is PyDetectedSdk && it !is PySdkToInstall }
-         ?: sdkList.firstOrNull { it is PyDetectedSdk }
-         ?: sdkList.firstOrNull { it is PySdkToInstall }
-}
-
-private val KEY_PATH_TO_SELECT_AFTER_MODEL_UPDATED: Key<String> by lazy { Key.create("PATH_TO_SELECT_AFTER_MODEL_UPDATED") }
-
-internal fun <T> ComboBox<T>.tryGetAndRemovePathToSelectAfterModelUpdate(): @NlsSafe Any? =
-  getUserData(KEY_PATH_TO_SELECT_AFTER_MODEL_UPDATED)?.also {
-    putUserData(KEY_PATH_TO_SELECT_AFTER_MODEL_UPDATED, null)
-  }
-
-internal fun ComboBox<*>.setPathToSelectAfterModelUpdate(targetPath: @NlsSafe String) {
-  putUserData(KEY_PATH_TO_SELECT_AFTER_MODEL_UPDATED, targetPath)
-}
-
 /**
  * Note. Here [ExtendableTextComponent.Extension] is used to display animated loader icon. This approach requires [ExtendableTextComponent]
  * to be rendered as the combobox context. When a [ComboBox] is configured as non-editable then an [ComboBox.renderer] is used to render the
@@ -323,10 +302,12 @@ internal fun ComboBox<*>.setPathToSelectAfterModelUpdate(targetPath: @NlsSafe St
  * @param makeTemporaryEditable if the property is set then [this] ComboBox is made temporary editable while displaying
  *                              animated loader icon
  */
-private fun ComboBox<*>.displayLoaderWhen(loading: SharedFlow<Boolean>,
-                                          makeTemporaryEditable: Boolean = false,
-                                          scope: CoroutineScope,
-                                          uiContext: CoroutineContext) {
+private fun ComboBox<*>.displayLoaderWhen(
+  loading: SharedFlow<Boolean>,
+  makeTemporaryEditable: Boolean = false,
+  scope: CoroutineScope,
+  uiContext: CoroutineContext,
+) {
   scope.launch(start = CoroutineStart.UNDISPATCHED) {
     loading.collectLatest { currentValue ->
       withContext(uiContext) {
@@ -336,15 +317,19 @@ private fun ComboBox<*>.displayLoaderWhen(loading: SharedFlow<Boolean>,
   }
 }
 
-internal fun <T : TextFieldWithBrowseButton> Cell<T>.displayLoaderWhen(loading: StateFlow<Boolean>,
-                                                                       scope: CoroutineScope,
-                                                                       uiContext: CoroutineContext): Cell<T> =
+internal fun <T : TextFieldWithBrowseButton> Cell<T>.displayLoaderWhen(
+  loading: StateFlow<Boolean>,
+  scope: CoroutineScope,
+  uiContext: CoroutineContext,
+): Cell<T> =
   applyToComponent { displayLoaderWhen(loading, scope, uiContext) }
 
-internal fun <T, C : ComboBox<T>> Cell<C>.displayLoaderWhen(loading: SharedFlow<Boolean>,
-                                                            makeTemporaryEditable: Boolean = false,
-                                                            scope: CoroutineScope,
-                                                            uiContext: CoroutineContext): Cell<C> =
+internal fun <T, C : ComboBox<T>> Cell<C>.displayLoaderWhen(
+  loading: SharedFlow<Boolean>,
+  makeTemporaryEditable: Boolean = false,
+  scope: CoroutineScope,
+  uiContext: CoroutineContext,
+): Cell<C> =
   applyToComponent {
     if (makeTemporaryEditable && editor.editorComponent !is ExtendableTextField) {
       editor = object : BasicComboBoxEditor() {
@@ -402,11 +387,13 @@ private fun ExtendableTextComponent.removeLoadingExtension() {
 
 const val UNKNOWN_EXECUTABLE = "<unknown_executable>"
 
-fun Panel.executableSelector(executable: ObservableMutableProperty<String>,
-                             validationRequestor: DialogValidationRequestor,
-                             labelText: @Nls String,
-                             missingExecutableText: @Nls String,
-                             installAction: ActionLink? = null): Cell<TextFieldWithBrowseButton> {
+fun Panel.executableSelector(
+  executable: ObservableMutableProperty<String>,
+  validationRequestor: DialogValidationRequestor,
+  labelText: @Nls String,
+  missingExecutableText: @Nls String,
+  installAction: ActionLink? = null,
+): Cell<TextFieldWithBrowseButton> {
   var textFieldCell: Cell<TextFieldWithBrowseButton>? = null
   var validationPanel: JPanel? = null
 

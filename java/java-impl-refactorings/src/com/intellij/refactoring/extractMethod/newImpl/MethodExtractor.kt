@@ -2,22 +2,19 @@
 package com.intellij.refactoring.extractMethod.newImpl
 
 import com.intellij.codeInsight.Nullability
+import com.intellij.codeInsight.template.impl.TemplateManagerImpl
+import com.intellij.codeInsight.template.impl.TemplateState
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.java.refactoring.JavaRefactoringBundle
 import com.intellij.openapi.application.EDT
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.application.WriteAction
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.command.CommandProcessor
+import com.intellij.openapi.command.writeCommandAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.ex.EditorSettingsExternalizable
-import com.intellij.openapi.progress.ProgressIndicator
-import com.intellij.openapi.progress.ProgressManager
-import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
-import com.intellij.openapi.util.ThrowableComputable
 import com.intellij.platform.ide.progress.withBackgroundProgress
 import com.intellij.psi.*
 import com.intellij.psi.util.PsiEditorUtil
@@ -27,11 +24,15 @@ import com.intellij.refactoring.RefactoringBundle
 import com.intellij.refactoring.extractMethod.ExtractMethodDialog
 import com.intellij.refactoring.extractMethod.ExtractMethodHandler
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.guessMethodName
+import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.renameTemplate
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.replaceWithMethod
+import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper.runWithDumbEditor
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.findAllOptionsToExtract
-import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.selectOption
+import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.selectOptionWithTargetClass
 import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodPipeline.withFilteredAnnotations
 import com.intellij.refactoring.extractMethod.newImpl.inplace.*
+import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractMethodCollector
+import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractUtils.createGreedyRangeMarker
 import com.intellij.refactoring.extractMethod.newImpl.parameterObject.ResultObjectExtractor
 import com.intellij.refactoring.extractMethod.newImpl.structures.ExtractOptions
 import com.intellij.refactoring.listeners.RefactoringEventData
@@ -40,6 +41,7 @@ import com.intellij.refactoring.util.CommonRefactoringUtil
 import com.intellij.refactoring.util.ConflictsUtil
 import com.intellij.util.containers.MultiMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.annotations.NonNls
@@ -49,24 +51,60 @@ data class ExtractedElements(val callElements: List<PsiElement>, val method: Psi
 
 class MethodExtractor {
 
+  internal fun restartInDialog(templateState: TemplateState, extractor: DuplicatesMethodExtractor, isLinkUsed: Boolean = false) {
+    val editor = templateState.editor
+    val project = templateState.project
+    val methodRange = templateState.currentVariableRange
+    val methodName = if (methodRange != null) editor.document.getText(methodRange) else ""
+    InplaceExtractMethodCollector.openExtractDialog.log(project, isLinkUsed)
+    TemplateManagerImpl.getTemplateState(editor)?.gotoEnd(true)
+    val extractOptions = extractor.extractOptions.copy(methodName = methodName)
+    val rangeToReplace = createGreedyRangeMarker(editor.document, extractor.rangeToReplaceOriginal)
+    val extractor = DuplicatesMethodExtractor(extractOptions, extractor.targetClass, rangeToReplace)
+    extractor.extractInDialog()
+  }
+
+  internal suspend fun restartInplace(templateState: TemplateState, defaultExtractor: DuplicatesMethodExtractor, popup: ExtractMethodPopupProvider) {
+    val startTime = System.currentTimeMillis()
+
+    val editor = templateState.editor
+    val project = templateState.project
+    val methodRange = templateState.currentVariableRange
+    val methodName = if (methodRange != null) editor.document.getText(methodRange) else ""
+
+    runWithDumbEditor(editor) {
+      withContext(Dispatchers.EDT) {
+        TemplateManagerImpl.getTemplateState(editor)?.gotoEnd(true)
+      }
+      val inplaceExtractor = readAction { InplaceMethodExtractor(editor, popup, defaultExtractor) }
+      inplaceExtractor.extractAndRunTemplate(emptyList())
+      val newTemplateState = TemplateManagerImpl.getTemplateState(editor)
+      writeCommandAction(project, ExtractMethodHandler.getRefactoringName()) {
+        renameTemplate(newTemplateState, methodName)
+      }
+    }
+    val endTime = System.currentTimeMillis()
+    InplaceExtractMethodCollector.previewUpdated.log(endTime - startTime)
+  }
+
   fun doExtract(file: PsiFile, range: TextRange) {
     if (!CommonRefactoringUtil.checkReadOnlyStatus(file.project, file)) return
     val coroutineScope = ExtractMethodService.getInstance(file.project).scope
 
     val editor = PsiEditorUtil.findEditor(file) ?: return
     val activeExtractor = InplaceMethodExtractor.getActiveExtractor(editor)
-    if (activeExtractor != null) {
-      activeExtractor.restartInDialog()
+    val template = TemplateManagerImpl.getTemplateState(editor)
+    if (activeExtractor != null && template != null) {
+      restartInDialog(template, activeExtractor.extractor, false)
       return
     }
 
     coroutineScope.launch {
-      doExtract(editor, file, range)
+      extract(editor, file, range)
     }
   }
 
-  private suspend fun doExtract(editor: Editor, file: PsiFile, range: TextRange){
-
+  suspend fun extract(editor: Editor, file: PsiFile, range: TextRange) {
       val elements = readAction { ExtractSelector().suggestElementsToExtract(file, range) }
       if (elements.isEmpty()) {
         InplaceExtractUtils.showExtractErrorHint(editor, RefactoringBundle.message("selected.block.should.represent.a.set.of.statements.or.an.expression"))
@@ -85,23 +123,39 @@ class MethodExtractor {
         return
       }
 
+      readAction {
+        sendRefactoringStartedEvent(elements.toTypedArray())
+      }
+
       val prepareStart = System.currentTimeMillis()
-      val descriptorsForAllTargetPlaces = prepareDescriptorsForAllTargetPlaces(file.project, editor, elements)
+
+      readAction { JavaDuplicatesFinder.linkCopiedClassMembersWithOrigin(file) }
+      val copiedFile = readAction { file.copy() as PsiFile }
+      val elementsInCopy = readAction { ExtractSelector().suggestElementsToExtract(copiedFile, range) }
+
+      val descriptorsForAllTargetPlaces = prepareDescriptorsForAllTargetPlaces(file.project, editor, elementsInCopy)
       if (descriptorsForAllTargetPlaces.isEmpty()) return
       val preparePlacesTime = System.currentTimeMillis() - prepareStart
 
       val options = withContext(Dispatchers.EDT) {
-        selectOption(editor, descriptorsForAllTargetPlaces)
+        selectOptionWithTargetClass(editor, file.project, descriptorsForAllTargetPlaces).await()
+      }
+      val guessedNames = readAction { suggestSafeMethodNames(options) }
+      val methodName = guessedNames.first()
+      val extractor = readAction {
+        val targetClass = PsiTreeUtil.findSameElementInCopy(options.targetClass, file)
+        val range = createGreedyRangeMarker(editor.document, range)
+        DuplicatesMethodExtractor(options.copy(methodName = methodName), targetClass, range)
       }
       if (EditorSettingsExternalizable.getInstance().isVariableInplaceRenameEnabled) {
         val templateStart = System.currentTimeMillis()
-        runInplaceExtract(editor, range, options)
+        runInplaceExtract(editor, extractor, guessedNames)
         val prepareTemplateTime = System.currentTimeMillis() - templateStart
         reportPerformanceStatistics(preparePlacesTime, prepareTemplateTime, descriptorsForAllTargetPlaces.size)
       }
       else {
         withContext(Dispatchers.EDT) {
-          extractInDialog(options.targetClass, options.elements, "", JavaRefactoringSettings.getInstance().EXTRACT_STATIC_METHOD)
+          extractor.extractInDialog()
         }
       }
   }
@@ -115,52 +169,23 @@ class MethodExtractor {
     )
   }
 
-  private suspend fun prepareDescriptorsForAllTargetPlaces(project: Project, editor: Editor, elements: List<PsiElement>): List<ExtractOptions> {
+  suspend fun prepareDescriptorsForAllTargetPlaces(project: Project, editor: Editor, elements: List<PsiElement>): List<ExtractOptions> {
     val message = JavaRefactoringBundle.message("dialog.title.analyze.code.fragment.to.extract")
     return withBackgroundProgress(project, message, true) {
       try {
         readAction { findAllOptionsToExtract(elements) }
       } catch (exception: ExtractException) {
-        InplaceExtractUtils.showExtractErrorHint(editor, exception)
+        InplaceExtractUtils.showExtractErrorHint(editor, exception.message.orEmpty(), exception.problems)
         emptyList()
       }
     }
   }
 
-  @Deprecated("")
-  fun prepareDescriptorsForAllTargetPlaces(editor: Editor, file: PsiFile, range: TextRange): List<ExtractOptions> {
-    try {
-      if (!CommonRefactoringUtil.checkReadOnlyStatus(file.project, file)) return emptyList()
-      val elements = ExtractSelector().suggestElementsToExtract(file, range)
-      if (elements.isEmpty()) {
-        throw ExtractException(RefactoringBundle.message("selected.block.should.represent.a.set.of.statements.or.an.expression"), file)
-      }
-      return computeWithAnalyzeProgress<List<ExtractOptions>, ExtractException>(file.project) {
-        findAllOptionsToExtract(elements)
-      }
-    }
-    catch (exception: ExtractException) {
-      InplaceExtractUtils.showExtractErrorHint(editor, exception)
-      return emptyList()
-    }
-  }
-
-  private fun <T, E: Exception> computeWithAnalyzeProgress(project: Project, throwableComputable: ThrowableComputable<T, E>): T {
-    return ProgressManager.getInstance().run(object : Task.WithResult<T, E>(project,
-      JavaRefactoringBundle.message("dialog.title.analyze.code.fragment.to.extract"), true) {
-      override fun compute(indicator: ProgressIndicator): T {
-        return ReadAction.compute(throwableComputable)
-      }
-    })
-  }
-
-  private suspend fun runInplaceExtract(editor: Editor, range: TextRange, options: ExtractOptions){
-    val popupSettings = readAction { createInplaceSettingsPopup(options) }
-    val guessedNames = readAction { suggestSafeMethodNames(options) }
-    val methodName = guessedNames.first()
-    val suggestedNames = guessedNames.takeIf { it.size > 1 }.orEmpty()
-    val extractor = readAction { DuplicatesMethodExtractor.create(options.targetClass, options.elements, methodName, options.isStatic) }
-    val inplaceExtractor = readAction { InplaceMethodExtractor(editor, range, popupSettings, extractor) }
+  private suspend fun runInplaceExtract(editor: Editor, extractor: DuplicatesMethodExtractor, methodNames: List<String>){
+    val popupSettings = readAction { createInplaceSettingsPopup(extractor.extractOptions) }
+    val suggestedNames = methodNames.takeIf { it.size > 1 }.orEmpty()
+    setupRestartOnSettingsChange(editor, popupSettings, extractor)
+    val inplaceExtractor = readAction { InplaceMethodExtractor(editor, popupSettings, extractor) }
     inplaceExtractor.extractAndRunTemplate(suggestedNames)
   }
 
@@ -196,10 +221,6 @@ class MethodExtractor {
       makeStaticDefault = if (showStatic) defaultStatic else null,
       staticPassFields = makeStaticAndPassFields
     )
-  }
-
-  fun executeRefactoringCommand(project: Project, command: () -> Unit) {
-    CommandProcessor.getInstance().executeCommand(project, command, ExtractMethodHandler.getRefactoringName(), null)
   }
 
   fun extractMethod(extractOptions: ExtractOptions): ExtractedElements {

@@ -66,7 +66,7 @@ public final class ExternalProjectsDataStorage extends SimpleModificationTracker
   private static final Logger LOG = Logger.getInstance(ExternalProjectsDataStorage.class);
 
   // exposed for tests
-  public static final int STORAGE_VERSION = 8;
+  public static final int STORAGE_VERSION = 9;
 
   private final @NotNull Project myProject;
   private final @NotNull ConcurrentMap<Pair<ProjectSystemId, File>, InternalExternalProjectInfo> myExternalRootProjects =
@@ -115,6 +115,9 @@ public final class ExternalProjectsDataStorage extends SimpleModificationTracker
     try {
       List<InternalExternalProjectInfo> projectInfos = load(myProject);
       readEnd = System.currentTimeMillis();
+
+      boolean isOpenedProjectWithIdeCaches = projectInfos != null && !projectInfos.isEmpty();
+      myProject.putUserData(ExternalSystemDataKeys.NEWLY_OPENED_PROJECT_WITH_IDE_CACHES, isOpenedProjectWithIdeCaches);
 
       boolean isOpenedProject = hasLinkedExternalProjects() && !ExternalSystemUtil.isNewProject(myProject);
       if (projectInfos == null || (projectInfos.isEmpty() && isOpenedProject)) {

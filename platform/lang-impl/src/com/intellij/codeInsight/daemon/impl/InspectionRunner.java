@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.daemon.impl;
 
 import com.intellij.codeInsight.daemon.HighlightDisplayKey;
@@ -20,6 +20,7 @@ import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.project.DumbService;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.Condition;
 import com.intellij.openapi.util.TextRange;
@@ -49,6 +50,7 @@ class InspectionRunner {
   private final TextRange myPriorityRange;
   private final boolean myInspectInjected;
   private final boolean myIsOnTheFly;
+  private final boolean myDumbMode;
   private final ProgressIndicator myProgress;
   private final boolean myIgnoreSuppressed;
   private final InspectionProfileWrapper myInspectionProfileWrapper;
@@ -60,6 +62,7 @@ class InspectionRunner {
                    @NotNull TextRange priorityRange,
                    boolean inspectInjected,
                    boolean isOnTheFly,
+                   boolean dumbMode,
                    @NotNull ProgressIndicator progress,
                    boolean ignoreSuppressed,
                    @NotNull InspectionProfileWrapper inspectionProfileWrapper,
@@ -69,6 +72,7 @@ class InspectionRunner {
     myPriorityRange = priorityRange;
     myInspectInjected = inspectInjected;
     myIsOnTheFly = isOnTheFly;
+    myDumbMode = dumbMode;
     myProgress = progress;
     myIgnoreSuppressed = ignoreSuppressed;
     myInspectionProfileWrapper = inspectionProfileWrapper;
@@ -165,6 +169,10 @@ class InspectionRunner {
 
       Processor<? super InspectionContext> contextProcessor = (context) -> {
         executeInImpatientReadAction(()-> {
+          if (DumbService.isDumb(project) != myDumbMode) {
+            // Dumb state change has sneaked between our read actions. Aborting.
+            return;
+          }
           // sequentially to avoid inspection visitor reentrancy
           processContext(context, context.elementsInside(), new InspectionVisitorOptimizer(context.elementsInside()));
           processContext(context, context.elementsOutside(), new InspectionVisitorOptimizer(context.elementsOutside()));
@@ -233,8 +241,7 @@ class InspectionRunner {
     InspectionUsageFUSStorage.getInstance(myPsiFile.getProject()).reportInspectionsWhichReportedProblems(inspectionIdsReportedProblems);
   }
 
-  @NotNull
-  private static TextRange finalPriorityRange(@NotNull TextRange priorityRange, @NotNull List<? extends Divider.DividedElements> allDivided) {
+  private static @NotNull TextRange finalPriorityRange(@NotNull TextRange priorityRange, @NotNull List<? extends Divider.DividedElements> allDivided) {
     long finalPriorityRange = allDivided.isEmpty() ? TextRangeScalarUtil.toScalarRange(priorityRange) : allDivided.get(0).priorityRange();
     for (int i = 1; i < allDivided.size(); i++) {
       Divider.DividedElements dividedElements = allDivided.get(i);
@@ -328,8 +335,9 @@ class InspectionRunner {
     RedundantSuppressInspectionBase redundantSuppressGlobalTool = (RedundantSuppressInspectionBase)redundantSuppressTool.getTool();
     LocalInspectionTool rsLocalTool = redundantSuppressGlobalTool.createLocalTool(redundantSuppressionDetector, mySuppressedElements, activeTools, myRestrictRange);
     List<LocalInspectionToolWrapper> wrappers = Collections.singletonList(new LocalInspectionToolWrapper(rsLocalTool));
-    InspectionRunner runner = new InspectionRunner(myPsiFile, myRestrictRange, myPriorityRange, myInspectInjected, true, myProgress, false,
-                                                   myInspectionProfileWrapper, mySuppressedElements);
+    InspectionRunner runner = new InspectionRunner(myPsiFile, myRestrictRange, myPriorityRange, myInspectInjected, true,
+                                                   myDumbMode, myProgress, false, myInspectionProfileWrapper,
+                                                   mySuppressedElements);
     result.addAll(runner.inspect(wrappers, HighlightSeverity.WARNING, false, applyIncrementallyCallback, contextFinishedCallback, null));
   }
 
@@ -399,9 +407,9 @@ class InspectionRunner {
                   wrappers + "; injectedPsi.getTextRange()=" + injectedPsi.getTextRange() + "; shouldInspect=" + shouldInspect(injectedPsi));
       }
     }
-    InspectionRunner injectedRunner = new InspectionRunner(injectedPsi, injectedPsi.getTextRange(),
-                                                           injectedPriorityRange, false, myIsOnTheFly, myProgress,
-                                                           myIgnoreSuppressed, myInspectionProfileWrapper, mySuppressedElements);
+    InspectionRunner injectedRunner = new InspectionRunner(injectedPsi, injectedPsi.getTextRange(), injectedPriorityRange,
+                                                           false, myIsOnTheFly, myDumbMode, myProgress, myIgnoreSuppressed,
+                                                           myInspectionProfileWrapper, mySuppressedElements);
     ApplyIncrementallyCallback applyInjectionsIncrementallyCallback = (descriptors, holder, visitingPsiElement, shortName) ->
       applyInjectedDescriptor(descriptors, holder, visitingPsiElement, shortName, host, addDescriptorIncrementallyCallback);
     List<? extends InspectionContext> injectedContexts = injectedRunner.inspect(
@@ -504,11 +512,10 @@ class InspectionRunner {
   static final class InspectionProblemHolder extends ProblemsHolder {
     final @NotNull LocalInspectionToolWrapper myToolWrapper;
     private final InspectionProfileWrapper myProfileWrapper;
-    @NotNull
-    private final ApplyIncrementallyCallback applyIncrementallyCallback;
-    @NotNull final AtomicInteger toolWasProcessed;
+    private final @NotNull ApplyIncrementallyCallback applyIncrementallyCallback;
+    final @NotNull AtomicInteger toolWasProcessed;
     // has to ignore duplicates which can sometimes appear due to high-concurrent process/retry in processQueueAsync
-    @NotNull final Collection<HighlightInfo> toolInfos = new HashSetQueue<>(); // guarded by toolInfos
+    final @NotNull Collection<HighlightInfo> toolInfos = new HashSetQueue<>(); // guarded by toolInfos
     private int resultCount;
     final ToolStampInfo toolStamps;
 

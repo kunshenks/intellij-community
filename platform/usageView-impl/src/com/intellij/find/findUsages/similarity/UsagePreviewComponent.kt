@@ -1,7 +1,11 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.find.findUsages.similarity
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataSink
+import com.intellij.openapi.actionSystem.UiDataProvider
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Iconable
 import com.intellij.ui.Gray
@@ -24,10 +28,10 @@ import javax.swing.JPanel
 
 internal class UsagePreviewComponent private constructor(
   usageView: UsageView,
-  usageInfo: UsageInfo,
+  private val usageInfo: UsageInfo,
   renderingData: SnippetRenderingData,
   parent: Disposable,
-) : JBPanel<JBPanel<*>>(), Disposable {
+) : JBPanel<JBPanel<*>>(), Disposable, UiDataProvider {
   var header: JPanel
   private var mySnippetComponent: UsageCodeSnippetComponent
   private val myUsageView: UsageView
@@ -41,6 +45,15 @@ internal class UsagePreviewComponent private constructor(
     add(mySnippetComponent)
     if (!Disposer.tryRegister(parent, this)) {
       Disposer.dispose(parent)
+    }
+  }
+
+  override fun uiDataSnapshot(sink: DataSink) {
+    sink.lazy(CommonDataKeys.NAVIGATABLE_ARRAY) {
+      val file = usageInfo.virtualFile ?: return@lazy emptyArray()
+      val navigationOffset = usageInfo.navigationOffset
+      val openFileDescriptor = OpenFileDescriptor(usageInfo.project, file, navigationOffset)
+      arrayOf(openFileDescriptor)
     }
   }
 
@@ -83,23 +96,17 @@ internal class UsagePreviewComponent private constructor(
       usageView: UsageView,
       usageInfo: UsageInfo
     ): ActionLink? {
-      val project = usageInfo.project
-      val file = usageInfo.virtualFile
-      val element = usageInfo.element
-      val actionLink: ActionLink?
-      if (file != null) {
-        actionLink = ActionLink(file.name, object : AbstractAction() {
-          override fun actionPerformed(e: ActionEvent) {
-            SimilarUsagesCollector.logNavigateToUsageClicked(project, sourceComponent.javaClass, usageView)
-            PsiNavigateUtil.navigate(element)
-          }
-        })
-        actionLink.background = UIUtil.TRANSPARENT_COLOR
-        actionLink.isOpaque = false
-        actionLink.icon = IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, project)
-        return actionLink
-      }
-      return null
+      val file = usageInfo.virtualFile ?: return null
+      val actionLink = ActionLink(file.name, object : AbstractAction() {
+        override fun actionPerformed(e: ActionEvent) {
+          SimilarUsagesCollector.logNavigateToUsageClicked(usageInfo.project, sourceComponent.javaClass, usageView)
+          PsiNavigateUtil.navigate(usageInfo.element)
+        }
+      })
+      actionLink.background = UIUtil.TRANSPARENT_COLOR
+      actionLink.isOpaque = false
+      actionLink.icon = IconUtil.getIcon(file, Iconable.ICON_FLAG_READ_STATUS, usageInfo.project)
+      return actionLink
     }
   }
 }

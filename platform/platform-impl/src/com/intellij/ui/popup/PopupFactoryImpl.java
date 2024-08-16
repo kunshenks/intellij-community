@@ -4,6 +4,7 @@ package com.intellij.ui.popup;
 import com.intellij.CommonBundle;
 import com.intellij.ide.IdeEventQueue;
 import com.intellij.ide.IdeTooltipManager;
+import com.intellij.internal.inspector.UiInspectorActionUtil;
 import com.intellij.internal.inspector.UiInspectorUtil;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
@@ -261,7 +262,7 @@ public class PopupFactoryImpl extends JBPopupFactory {
       this(parentPopup,
            createStep(title, actionGroup, dataContext, actionPlace, presentationFactory, options),
            disposeCallback, dataContext, options.maxRowCount);
-      UiInspectorUtil.registerProvider(getList(), () -> UiInspectorUtil.collectActionGroupInfo(
+      UiInspectorUtil.registerProvider(getList(), () -> UiInspectorActionUtil.collectActionGroupInfo(
         "Menu", actionGroup, actionPlace, ((ActionPopupStep)getStep()).getPresentationFactory()));
     }
 
@@ -925,9 +926,8 @@ public class PopupFactoryImpl extends JBPopupFactory {
       return description == null ? getTooltip() : description;
     }
 
-    public @NlsContexts.DetailedDescription String getTooltip() {
-      //noinspection deprecation
-      return (String)myPresentation.getClientProperty(JComponent.TOOL_TIP_TEXT_KEY);
+    public @NlsContexts.Tooltip String getTooltip() {
+      return myPresentation.getClientProperty(ActionUtil.TOOLTIP_TEXT);
     }
 
     @Override

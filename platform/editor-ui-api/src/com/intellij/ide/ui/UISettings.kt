@@ -2,6 +2,7 @@
 package com.intellij.ide.ui
 
 import com.intellij.diagnostic.LoadingState
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.*
@@ -551,6 +552,12 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
       }
     }
 
+  var showPreviewInSearchEverywhere: Boolean
+    get() = state.showPreviewInSearchEverywhere
+    set(value) {
+      state.showPreviewInSearchEverywhere = value
+    }
+
   companion object {
     init {
       if (JBUIScale.SCALE_VERBOSE) {
@@ -609,22 +616,26 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
         val registryValue = Registry.get(registryKey)
         if (registryValue.isMultiValue) {
           val option = registryValue.selectedOption
-          if (option.equals("Enabled")) hint = true
-          else if (option.equals("Disabled")) hint = false
-          else hint = defaultValue
+          when {
+            option.equals("Enabled") -> hint = true
+            option.equals("Disabled") -> hint = false
+            else -> hint = defaultValue
+          }
         }
         else {
           hint = if (registryValue.isBoolean && registryValue.asBoolean()) true else defaultValue
         }
       }
-      else hint = defaultValue
+      else {
+        hint = defaultValue
+      }
       return if (hint) RenderingHints.VALUE_FRACTIONALMETRICS_ON else RenderingHints.VALUE_FRACTIONALMETRICS_OFF
     }
 
     fun getPreferredFractionalMetricsValue(): Any {
-      val enableByDefault = SystemInfo.isMacOSCatalina || (FontSubpixelResolution.ENABLED
-                                                           && AntialiasingType.getKeyForCurrentScope(false) ==
-                                                           RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+      val enableByDefault = SystemInfo.isMacOSCatalina ||
+                            (FontSubpixelResolution.ENABLED
+                             && AntialiasingType.getKeyForCurrentScope(false) == RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
       return calcFractionalMetricsHint("ide.text.fractional.metrics", enableByDefault)
     }
 
@@ -731,7 +742,7 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
   }
 
   /**
-   * Notifies all registered listeners that UI settings has been changed.
+   * Notifies all registered listeners that UI settings have been changed.
    */
   fun fireUISettingsChanged() {
     updateDeprecatedProperties()
@@ -814,6 +825,12 @@ class UISettings @NonInjectable constructor(private val notRoamableOptions: NotR
     if (!state.allowMergeButtons) {
       Registry.get("ide.allow.merge.buttons").setValue(false)
       state.allowMergeButtons = true
+    }
+
+    // migrate old state of Search Everywhere preview
+    if (PropertiesComponent.getInstance().isValueSet("SearchEverywhere.previewPropertyKey")) {
+      state.showPreviewInSearchEverywhere = true
+      PropertiesComponent.getInstance().unsetValue("SearchEverywhere.previewPropertyKey")
     }
   }
 

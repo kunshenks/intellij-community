@@ -3,7 +3,6 @@
 
 package org.jetbrains.intellij.build
 
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.persistentListOf
 import org.jetbrains.intellij.build.impl.*
@@ -16,6 +15,8 @@ import org.jetbrains.intellij.build.io.copyDir
 import org.jetbrains.intellij.build.io.copyFileToDir
 import org.jetbrains.intellij.build.kotlin.KotlinPluginBuilder
 import org.jetbrains.intellij.build.python.PythonCommunityPluginModules
+import org.jetbrains.intellij.build.telemetry.TraceManager
+import org.jetbrains.intellij.build.telemetry.useWithScope
 import org.jetbrains.jps.model.library.JpsOrderRootType
 import java.nio.file.Path
 import java.util.*
@@ -25,6 +26,7 @@ object CommunityRepositoryModules {
    * Specifies non-trivial layout for all plugins that sources are located in 'community' and 'contrib' repositories
    */
   val COMMUNITY_REPOSITORY_PLUGINS: PersistentList<PluginLayout> = persistentListOf(
+    pluginAuto("intellij.json") {},
     pluginAuto("intellij.yaml") { spec ->
       spec.withModule("intellij.yaml.editing", "yaml-editing.jar")
     },
@@ -347,6 +349,8 @@ object CommunityRepositoryModules {
       //tools/adt/idea/connection-assistant:connection-assistant <= REMOVED
       spec.withModule("intellij.android.adb", "android.jar")
       spec.withModule("intellij.android.adb.ui", "android.jar")
+      spec.withModule("intellij.android.backup", "android.jar")
+      spec.withModule("intellij.android.backup.api", "android.jar")
       spec.withModule("intellij.android.lint", "android.jar")
       spec.withModule("intellij.android.templates", "android.jar")
       spec.withModule("intellij.android.apkanalyzer", "android.jar")

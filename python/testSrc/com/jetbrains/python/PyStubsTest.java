@@ -19,7 +19,6 @@ import com.intellij.testFramework.TestDataPath;
 import com.intellij.util.ObjectUtils;
 import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.ast.PyAstFunction;
-import com.jetbrains.python.psi.impl.PyVersionCheck;
 import com.jetbrains.python.codeInsight.typing.PyTypingTypeProvider;
 import com.jetbrains.python.fixtures.PyTestCase;
 import com.jetbrains.python.psi.*;
@@ -138,32 +137,17 @@ public class PyStubsTest extends PyTestCase {
     element(PyFileStub.class)
       .withChildren(
         element(PyImportStatementStub.class),
-        ifPart(3, 0, false)
+        element(PyFunctionStub.class, versionRange("3.0", "3.12")),
+        element(PyTypeAliasStatementStub.class, versionLessThan("2.2")),
+        element(PyTargetExpressionStub.class, versionRange("2.2", "2.5")),
+        element(PyClassStub.class, versionRange("2.5", "3.0"))
           .withChildren(
-            ifPart(3, 12, true)
+            element(PyClassStub.class, versionRange("2.5", "3.0"))
               .withChildren(
-                element(PyFunctionStub.class)
-              )
-          ),
-        element(PyElsePartStub.class)
-          .withChildren(
-            ifPart(2, 2, true),
-            elifPart(2, 5, true),
-            element(PyElsePartStub.class)
-              .withChildren(
-                element(PyClassStub.class)
-                  .withChildren(
-                    ifPart(3, 12, true)
-                      .withChildren(
-                        element(PyClassStub.class)
-                          .withChildren(
-                            ifPart(3, 11, false),
-                            element(PyElsePartStub.class)
-                          )
-                      ),
-                    element(PyElsePartStub.class)
-                  )
-              )
+                element(PyFunctionStub.class, versionRange("3.11", "3.0")),
+                element(PyTargetExpressionStub.class, versionRange("2.5", "3.0"))
+              ),
+            element(PyTargetExpressionStub.class, versionRange("3.12", "3.0"))
           )
       )
       .test(file.getStub());
@@ -321,13 +305,12 @@ public class PyStubsTest extends PyTestCase {
   }
 
   public void testImportInExcept() {
-    runWithLanguageLevel(LanguageLevel.PYTHON26, () -> {
-      final PyFileImpl file = (PyFileImpl)getTestFile();
-      final PsiElement element = file.getElementNamed("tzinfo");
-      assertTrue(String.valueOf(element), element instanceof PyClass);
-      assertNotParsed(file);
-    });
+    final PyFileImpl file = (PyFileImpl) getTestFile();
+    final PsiElement element = file.getElementNamed("tzinfo");
+    assertTrue(element != null ? element.toString() : "null", element instanceof PyClass);
+    assertNotParsed(file);
   }
+
 
   public void testImportFeatures() {
     final PyFileImpl file = (PyFileImpl) getTestFile();
@@ -1163,6 +1146,7 @@ public class PyStubsTest extends PyTestCase {
     doTestTypeParameterStub(typeAliasStatement, file);
   }
 
+
   private void doTestTypingTypedDictArguments() {
     doTestTypedDict("name", Arrays.asList("x", "y"), Arrays.asList("str", "int"), QualifiedName.fromComponents("TypedDict"));
   }
@@ -1218,7 +1202,8 @@ public class PyStubsTest extends PyTestCase {
 
       final PyType fieldType = fieldTypeAndTotality.getType();
       assertEquals(fieldsTypesIterator.next(), fieldType == null ? null : fieldType.getName());
-      assertFalse(fieldTypeAndTotality.isRequired());
+      assertFalse(fieldTypeAndTotality.getQualifiers().isRequired());
+      assertFalse(fieldTypeAndTotality.getQualifiers().isReadOnly());
     }
 
     assertFalse(fieldsNamesIterator.hasNext());
@@ -1273,22 +1258,24 @@ public class PyStubsTest extends PyTestCase {
     }
   }
 
-  private static @NotNull StubElementValidator element(@NotNull Class<?> clazz) {
+  private static <T extends StubElement<?>> @NotNull StubElementValidator element(@NotNull Class<T> clazz) {
     return stub -> assertInstanceOf(stub, clazz);
   }
 
-  private static @NotNull StubElementValidator ifPart(int major, int minor, boolean isLessThan) {
+  private static <T extends PyVersionSpecificStub> @NotNull StubElementValidator element(@NotNull Class<T> clazz,
+                                                                                         @NotNull PyVersionRange versionRange) {
     return stub -> {
-      assertInstanceOf(stub, PyIfPartIfStub.class);
-      assertEquals(new PyVersionCheck(new Version(major, minor, 0), isLessThan), ((PyIfPartIfStub)stub).getVersionCheck());
+      assertInstanceOf(stub, clazz);
+      assertEquals(versionRange, clazz.cast(stub).getVersionRange());
     };
   }
 
-  private static @NotNull StubElementValidator elifPart(int major, int minor, boolean isLessThan) {
-    return stub -> {
-      assertInstanceOf(stub, PyIfPartElifStub.class);
-      assertEquals(new PyVersionCheck(new Version(major, minor, 0), isLessThan), ((PyIfPartElifStub)stub).getVersionCheck());
-    };
+  private static @NotNull PyVersionRange versionLessThan(@NotNull String version) {
+    return new PyVersionRange(null, Version.parseVersion(version));
+  }
+
+  private static @NotNull PyVersionRange versionRange(@NotNull String lowInclusive, @NotNull String highExclusive) {
+    return new PyVersionRange(Version.parseVersion(lowInclusive), Version.parseVersion(highExclusive));
   }
 
   private interface StubElementValidator {

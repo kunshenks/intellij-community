@@ -6,8 +6,6 @@ import com.intellij.openapi.application.Experiments;
 import com.intellij.openapi.util.text.StringUtil;
 import org.jetbrains.annotations.NotNull;
 
-import java.util.MissingResourceException;
-
 /**
  * @author Konstantin Bulenkov
  */
@@ -21,13 +19,7 @@ final class ExperimentalFeatureRegistryValueWrapper extends RegistryValue {
   }
 
   @Override
-  public String get(@NotNull String key, String defaultValue, boolean isValue) throws MissingResourceException {
-    return asString();
-  }
-
-  @NotNull
-  @Override
-  public String asString() {
+  public @NotNull String asString() {
     return Boolean.toString(asBoolean());
   }
 
@@ -57,9 +49,8 @@ final class ExperimentalFeatureRegistryValueWrapper extends RegistryValue {
     Experiments.getInstance().setFeatureEnabled(feature.id, enable);
   }
 
-  @NotNull
   @Override
-  public String getDescription() {
+  public @NotNull String getDescription() {
     return StringUtil.notNullize(feature.description);
   }
 }

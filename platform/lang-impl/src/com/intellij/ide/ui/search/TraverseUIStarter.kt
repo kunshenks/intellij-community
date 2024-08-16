@@ -16,14 +16,16 @@ import com.intellij.ide.plugins.IdeaPluginDescriptorImpl
 import com.intellij.ide.plugins.PluginManagerConfigurable
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.ide.plugins.cl.PluginAwareClassLoader
+import com.intellij.ide.ui.search.SearchableOptionsRegistrar.SEARCHABLE_OPTIONS_XML_NAME
 import com.intellij.idea.AppMode
+import com.intellij.l10n.LocalizationUtil
 import com.intellij.openapi.actionSystem.ActionGroup
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.impl.ActionManagerImpl
-import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.ModernApplicationStarter
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.extensions.PluginDescriptor
@@ -69,7 +71,7 @@ private class TraverseUIStarter : ModernApplicationStarter() {
         println("Searchable options index builder failed")
         e.printStackTrace()
       }
-      catch (ignored: Throwable) {
+      catch (_: Throwable) {
       }
       ApplicationManagerEx.getApplicationEx().exit( /*force: */ false, /*confirm: */ true, -1 )
     }
@@ -153,8 +155,11 @@ private suspend fun saveResults(outDir: Path, roots: Map<OptionSetId, List<Confi
         hash.putString(module.pluginId.idString)
         hash.putString(module.moduleName ?: "")
 
+        require(LocalizationUtil.getLocaleOrNullForDefault() == null) {
+          "Locale must be default"
+        }
         val fileName = (if (module.moduleName == null) "p-${module.pluginId.idString}" else "m-${module.moduleName}") +
-                       "-" + SearchableOptionsRegistrar.getSearchableOptionsName() + ".json"
+                       "-" + SEARCHABLE_OPTIONS_XML_NAME + ".json"
         val file = outDir.resolve(fileName)
         try {
           Files.newBufferedWriter(file).use { writer ->
@@ -355,7 +360,7 @@ private suspend fun doBuildSearchableOptions(
 
   val defaultProject = serviceAsync<ProjectManager>().defaultProject
   withContext(Dispatchers.EDT) {
-    blockingContext {
+    writeIntentReadAction {
       for (extension in TraverseUIHelper.helperExtensionPoint.extensionList) {
         extension.beforeStart()
       }

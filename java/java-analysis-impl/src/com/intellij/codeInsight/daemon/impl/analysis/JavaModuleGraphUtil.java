@@ -230,12 +230,12 @@ public final class JavaModuleGraphUtil {
     return getRequiresGraph(source).reads(source, destination);
   }
 
-  public static boolean reads(@NotNull PsiJavaModule source, @NotNull String destination) {
-    return getRequiresGraph(source).reads(source, source, destination);
+  public static @NotNull Set<PsiJavaModule> getAllDependencies(PsiJavaModule source) {
+    return getRequiresGraph(source).getAllDependencies(source, false);
   }
 
-  public static @NotNull Set<PsiJavaModule> getAllDependencies(PsiJavaModule source) {
-    return getRequiresGraph(source).getAllDependencies(source);
+  public static @NotNull Set<PsiJavaModule> getAllTransitiveDependencies(PsiJavaModule source) {
+    return getRequiresGraph(source).getAllDependencies(source, true);
   }
 
   public static @Nullable Trinity<String, PsiJavaModule, PsiJavaModule> findConflict(@NotNull PsiJavaModule module) {
@@ -244,6 +244,32 @@ public final class JavaModuleGraphUtil {
 
   public static @Nullable PsiJavaModule findOrigin(@NotNull PsiJavaModule module, @NotNull String packageName) {
     return getRequiresGraph(module).findOrigin(module, packageName);
+  }
+
+  /**
+   * Determines if a specified module is readable from a given context
+   *
+   * @param place            current module/position
+   * @param targetModuleFile file from the target module
+   * @return {@code true} if the target module is readable from the place; {@code false} otherwise.
+   */
+  public static boolean isModuleReadable(@NotNull PsiElement place,
+                                         @NotNull VirtualFile targetModuleFile) {
+    PsiJavaModule targetModule = findDescriptorByFile(targetModuleFile, place.getProject());
+    if (targetModule == null) return true;
+    return isModuleReadable(place, targetModule);
+  }
+
+  /**
+   * Determines if the specified modules are readable from a given context.
+   *
+   * @param place        the current position or element from where readability is being checked
+   * @param targetModule the target module to check readability against
+   * @return {@code true} if any of the target modules are readable from the current context; {@code false} otherwise
+   */
+  public static boolean isModuleReadable(@NotNull PsiElement place,
+                                         @NotNull PsiJavaModule targetModule) {
+    return ContainerUtil.and(JavaModuleSystem.EP_NAME.getExtensionList(), sys -> sys.isAccessible(targetModule, place));
   }
 
   public static boolean addDependency(@NotNull PsiJavaModule from,
@@ -509,26 +535,6 @@ public final class JavaModuleGraphUtil {
       myTransitiveEdges = transitiveEdges;
     }
 
-    public boolean reads(@NotNull PsiJavaModule source, @NotNull String destination) {
-      return reads(source, source, destination);
-    }
-
-    private boolean reads(@NotNull PsiJavaModule top, @NotNull PsiJavaModule source, @NotNull String destination) {
-      Collection<PsiJavaModule> nodes = myGraph.getNodes();
-      if (ContainerUtil.exists(nodes, m -> m.getName().equals(destination)) && nodes.contains(source)) {
-        Iterator<PsiJavaModule> directReaders = myGraph.getIn(source);
-        while (directReaders.hasNext()) {
-          PsiJavaModule next = directReaders.next();
-          if (top.equals(source)) {
-            if (next.getName().equals(destination) || reads(top, next, destination)) return true;
-          } else if(myTransitiveEdges.contains(key(next, source))) {
-            if (next.getName().equals(destination) || reads(top, next, destination)) return true;
-          }
-        }
-      }
-      return false;
-    }
-
     public boolean reads(PsiJavaModule source, PsiJavaModule destination) {
       Collection<PsiJavaModule> nodes = myGraph.getNodes();
       if (nodes.contains(destination) && nodes.contains(source)) {
@@ -594,18 +600,18 @@ public final class JavaModuleGraphUtil {
       return module.getName() + '/' + exporter.getName();
     }
 
-    public @NotNull Set<PsiJavaModule> getAllDependencies(@NotNull PsiJavaModule module) {
+    public @NotNull Set<PsiJavaModule> getAllDependencies(@NotNull PsiJavaModule module, boolean transitive) {
       Set<PsiJavaModule> requires = new HashSet<>();
-      collectDependencies(module, requires);
+      collectDependencies(module, requires, transitive);
       return requires;
     }
 
-    private void collectDependencies(@NotNull PsiJavaModule module, @NotNull Set<PsiJavaModule> dependencies) {
+    private void collectDependencies(@NotNull PsiJavaModule module, @NotNull Set<PsiJavaModule> dependencies, boolean transitive) {
       for (Iterator<PsiJavaModule> iterator = myGraph.getIn(module); iterator.hasNext();) {
         PsiJavaModule dependency = iterator.next();
-        if (!dependencies.contains(dependency)) {
+        if (!dependencies.contains(dependency) && (!transitive || myTransitiveEdges.contains(key(dependency, module)))) {
           dependencies.add(dependency);
-          collectDependencies(dependency, dependencies);
+          collectDependencies(dependency, dependencies, transitive);
         }
       }
     }
@@ -643,22 +649,25 @@ public final class JavaModuleGraphUtil {
   }
 
   public static class JavaModuleScope extends GlobalSearchScope {
-    @NotNull private final Set<PsiJavaModule> myModules;
+    @NotNull private final MultiMap<String, PsiJavaModule> myModules;
     private final boolean myIncludeLibraries;
     private final boolean myIsInTests;
 
     private JavaModuleScope(@NotNull Project project, @NotNull Set<PsiJavaModule> modules) {
       super(project);
-      myModules = modules;
+      myModules = new MultiMap<>();
+      for (PsiJavaModule module : modules) {
+        myModules.putValue(module.getName(), module);
+      }
       ProjectFileIndex fileIndex = ProjectFileIndex.getInstance(project);
-      myIncludeLibraries = ContainerUtil.or(myModules, m -> {
+      myIncludeLibraries = ContainerUtil.or(modules, m -> {
         PsiFile containingFile = m.getContainingFile();
         if (containingFile == null) return true;
         VirtualFile moduleFile = containingFile.getVirtualFile();
         if (moduleFile == null) return true;
         return fileIndex.isInLibrary(moduleFile);
       });
-      myIsInTests = !myIncludeLibraries && ContainerUtil.or(myModules, m -> {
+      myIsInTests = !myIncludeLibraries && ContainerUtil.or(modules, m -> {
         PsiFile containingFile = m.getContainingFile();
         if (containingFile == null) return true;
         VirtualFile moduleFile = containingFile.getVirtualFile();
@@ -669,7 +678,7 @@ public final class JavaModuleGraphUtil {
 
     @Override
     public boolean isSearchInModuleContent(@NotNull Module aModule) {
-      return myModules.contains(findDescriptorByModule(aModule, myIsInTests));
+      return contains(findDescriptorByModule(aModule, myIsInTests));
     }
 
     @Override
@@ -683,9 +692,15 @@ public final class JavaModuleGraphUtil {
       if (project == null) return false;
       if (!isJvmLanguageFile(file)) return false;
       ProjectFileIndex index = ProjectFileIndex.getInstance(project);
-      if (index.isInLibrary(file)) return myIncludeLibraries && myModules.contains(findDescriptorInLibrary(project, index, file));
+      if (index.isInLibrary(file)) return myIncludeLibraries && contains(findDescriptorInLibrary(project, index, file));
       Module module = index.getModuleForFile(file);
-      return myModules.contains(findDescriptorByModule(module, myIsInTests));
+      return contains(findDescriptorByModule(module, myIsInTests));
+    }
+
+    private boolean contains(@Nullable PsiJavaModule module) {
+      if (module == null || !module.isValid()) return false;
+      Collection<PsiJavaModule> myCollectedModules = myModules.get(module.getName());
+      return myCollectedModules.contains(module);
     }
 
     private static boolean isJvmLanguageFile(@NotNull VirtualFile file) {
@@ -711,9 +726,13 @@ public final class JavaModuleGraphUtil {
       return new JavaModuleScope(module.getProject(), Set.of(module));
     }
 
+    /**
+     * Creates a JavaModuleScope that includes the given module and all transitive modules.
+     *
+     * @param module the base PsiJavaModule for which to create the scope, must not be null
+     * @return a new JavaModuleScope including all transitive modules of the given module, or null if the moduleFile is null or no transitive modules are found
+     */
     public static @Nullable JavaModuleScope moduleWithTransitiveScope(@NotNull PsiJavaModule module) {
-      PsiFile moduleFile = module.getContainingFile();
-      if (moduleFile == null) return null;
       Set<PsiJavaModule> allModules = JavaResolveUtil.getAllTransitiveModulesIncludeCurrent(module);
       if (allModules.isEmpty()) return null;
       return new JavaModuleScope(module.getProject(), allModules);

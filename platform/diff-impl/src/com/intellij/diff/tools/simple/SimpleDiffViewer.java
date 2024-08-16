@@ -15,11 +15,11 @@ import com.intellij.diff.tools.util.side.TwosideContentPanel;
 import com.intellij.diff.tools.util.side.TwosideTextDiffViewer;
 import com.intellij.diff.tools.util.text.TwosideTextDiffProvider;
 import com.intellij.diff.util.*;
-import com.intellij.diff.util.Range;
 import com.intellij.diff.util.DiffUserDataKeysEx.ScrollToPolicy;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.actionSystem.*;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.diff.DiffBundle;
 import com.intellij.openapi.diff.DiffNavigationContext;
 import com.intellij.openapi.editor.Document;
@@ -38,7 +38,10 @@ import com.intellij.ui.DirtyUI;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
 import com.intellij.util.concurrency.annotations.RequiresWriteLock;
 import com.intellij.util.containers.ContainerUtil;
-import org.jetbrains.annotations.*;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.Nls;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import javax.swing.*;
 import java.awt.*;
@@ -265,7 +268,8 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
       myModel.setChanges(ContainerUtil.notNullize(changes), isContentsEqual);
       myAlignedDiffModel.realignChanges();
 
-      myFoldingModel.install(foldingState, myRequest, getFoldingModelSettings());
+      //maybe readaction
+      WriteIntentReadAction.run((Runnable)() -> myFoldingModel.install(foldingState, myRequest, getFoldingModelSettings()));
 
       myInitialScrollHelper.onRediff();
 
@@ -711,22 +715,20 @@ public class SimpleDiffViewer extends TwosideTextDiffViewer {
   // Helpers
   //
 
-  @Nullable
   @Override
-  public Object getData(@NotNull @NonNls String dataId) {
-    if (DiffDataKeys.PREV_NEXT_DIFFERENCE_ITERABLE.is(dataId)) {
-      return myPrevNextDifferenceIterable;
+  public @Nullable PrevNextDifferenceIterable getDifferenceIterable() {
+    return myPrevNextDifferenceIterable;
+  }
+
+  @Override
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    super.uiDataSnapshot(sink);
+    SimpleDiffChange change = getSelectedChange(getCurrentSide());
+    if (change != null) {
+      sink.set(DiffDataKeys.CURRENT_CHANGE_RANGE, new LineRange(
+        change.getStartLine(getCurrentSide()), change.getEndLine(getCurrentSide())));
     }
-    else if (DiffDataKeys.CURRENT_CHANGE_RANGE.is(dataId)) {
-      SimpleDiffChange change = getSelectedChange(getCurrentSide());
-      if (change != null) {
-        return new LineRange(change.getStartLine(getCurrentSide()), change.getEndLine(getCurrentSide()));
-      }
-    }
-    else if (DiffDataKeys.EDITOR_CHANGED_RANGE_PROVIDER.is(dataId)) {
-      return new MyChangedRangeProvider();
-    }
-    return super.getData(dataId);
+    sink.set(DiffDataKeys.EDITOR_CHANGED_RANGE_PROVIDER, new MyChangedRangeProvider());
   }
 
   private class MySyncScrollable extends BaseSyncScrollable {

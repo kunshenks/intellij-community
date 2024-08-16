@@ -26,6 +26,8 @@ import java.nio.file.Path
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.io.path.invariantSeparatorsPathString
+import org.jetbrains.intellij.build.io.runProcess
+import kotlin.time.Duration
 
 class BuildContextImpl internal constructor(
   private val compilationContext: CompilationContext,
@@ -84,7 +86,7 @@ class BuildContextImpl internal constructor(
     get() = productProperties.rootModuleForModularLoader != null && options.useModularLoader
 
   override val generateRuntimeModuleRepository: Boolean
-    get() = useModularLoader || isEmbeddedJetBrainsClientEnabled && options.generateRuntimeModuleRepository
+    get() = useModularLoader || options.generateRuntimeModuleRepository
 
   private var builtinModulesData: BuiltinModulesFileData? = null
 
@@ -330,6 +332,8 @@ class BuildContextImpl internal constructor(
 
     // https://youtrack.jetbrains.com/issue/IDEA-269280
     jvmArgs.add("-Daether.connector.resumeDownloads=false")
+
+    jvmArgs.add("-Dskiko.library.path=${macroName}/lib/skiko-awt-runtime-all".let { if (isScript) '"' + it + '"' else it })
     jvmArgs.add("-Dcompose.swing.render.on.graphics=true")
 
     jvmArgs.addAll(getCommandLineArgumentsForOpenPackages(this, os))
@@ -381,6 +385,24 @@ class BuildContextImpl internal constructor(
       additionalPluginModules.isEmpty() -> return devModeProductRunner.await()
       else -> return createDevModeProductRunner(additionalPluginModules = additionalPluginModules, context = this)
     }
+  }
+
+  override suspend fun runProcess(
+    vararg args: String,
+    workingDir: Path?,
+    timeout: Duration,
+    additionalEnvVariables: Map<String, String>,
+    attachStdOutToException: Boolean,
+  ) {
+    runProcess(
+      args.toList(),
+      workingDir = workingDir,
+      timeout = timeout,
+      additionalEnvVariables = additionalEnvVariables,
+      stdOutConsumer = messages::info,
+      stdErrConsumer = messages::warning,
+      attachStdOutToException = attachStdOutToException,
+    )
   }
 }
 

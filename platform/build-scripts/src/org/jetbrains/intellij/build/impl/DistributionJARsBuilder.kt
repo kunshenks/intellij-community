@@ -7,11 +7,12 @@ import com.fasterxml.jackson.jr.ob.JSON
 import com.intellij.openapi.util.io.FileUtilRt
 import com.intellij.openapi.util.io.NioFiles
 import com.intellij.openapi.util.text.StringUtil
-import com.intellij.platform.diagnostic.telemetry.helpers.use
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
+import org.jetbrains.intellij.build.telemetry.use
+import org.jetbrains.intellij.build.telemetry.useWithScope
 import com.intellij.util.io.Compressor
 import com.jetbrains.plugin.blockmap.core.BlockMap
 import com.jetbrains.plugin.blockmap.core.FileHash
+import com.jetbrains.plugin.structure.base.plugin.PluginCreationFail
 import com.jetbrains.plugin.structure.base.plugin.PluginCreationSuccess
 import com.jetbrains.plugin.structure.intellij.plugin.IdePluginManager
 import io.opentelemetry.api.common.AttributeKey
@@ -22,7 +23,7 @@ import io.opentelemetry.extension.kotlin.asContextElement
 import kotlinx.coroutines.*
 import org.apache.commons.compress.archivers.zip.Zip64Mode
 import org.jetbrains.intellij.build.*
-import org.jetbrains.intellij.build.TraceManager.spanBuilder
+import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
 import org.jetbrains.intellij.build.fus.createStatisticsRecorderBundledMetadataProviderTask
 import org.jetbrains.intellij.build.impl.projectStructureMapping.*
 import org.jetbrains.intellij.build.io.*
@@ -396,13 +397,9 @@ internal suspend fun buildNonBundledPlugins(
   searchableOptionSet: SearchableOptionSetDescriptor?,
   context: BuildContext,
 ): List<Pair<PluginBuildDescriptor, List<DistributionFileEntry>>> {
-  return spanBuilder("build non-bundled plugins").setAttribute("count", pluginsToPublish.size.toLong()).useWithScope { span ->
+  return context.executeStep(spanBuilder("build non-bundled plugins").setAttribute("count", pluginsToPublish.size.toLong()), BuildOptions.NON_BUNDLED_PLUGINS_STEP) {
     if (pluginsToPublish.isEmpty()) {
-      return@useWithScope emptyList()
-    }
-    if (context.isStepSkipped(BuildOptions.NON_BUNDLED_PLUGINS_STEP)) {
-      span.addEvent("skip")
-      return@useWithScope emptyList()
+      return@executeStep emptyList()
     }
 
     val nonBundledPluginsArtifacts = context.paths.artifactDir.resolve("${context.applicationInfo.productCode}-plugins")
@@ -472,39 +469,44 @@ internal suspend fun buildNonBundledPlugins(
       generatePluginRepositoryMetaFile(list.filter { it.pluginZip.startsWith(autoUploadingDir) }, autoUploadingDir, context)
     }
 
-    if (!context.isStepSkipped(BuildOptions.VALIDATE_PLUGINS_TO_BE_PUBLISHED)) {
-      for (plugin in pluginSpecs) {
-        launch {
-          validatePlugin(path = plugin.pluginZip, context = context)
-        }
-      }
-    }
+    validatePlugins(context, pluginSpecs)
 
     mappings
+  } ?: emptyList()
+}
+
+private suspend fun validatePlugins(context: BuildContext, pluginSpecs: Collection<PluginRepositorySpec>) {
+  context.executeStep(spanBuilder("plugins validation"), BuildOptions.VALIDATE_PLUGINS_TO_BE_PUBLISHED) { span ->
+    for (plugin in pluginSpecs) {
+      val path = plugin.pluginZip
+      if (Files.notExists(path)) {
+        span.addEvent("doesn't exist, skipped", Attributes.of(AttributeKey.stringKey("path"), "$path"))
+        continue
+      }
+      launch {
+        validatePlugin(path, context, span)
+      }
+    }
   }
 }
 
-private suspend fun validatePlugin(path: Path, context: BuildContext) {
-  spanBuilder("plugin validation").setAttribute("path", path.toString()).useWithScope { span ->
-    if (Files.notExists(path)) {
-      span.addEvent("path doesn't exist, skipped")
-      return@useWithScope
-    }
-
-    val pluginManager = IdePluginManager.createManager()
-    val result = pluginManager.createPlugin(path, validateDescriptor = true)
-    // todo fix AddStatisticsEventLogListenerTemporary
-    val problems = context.productProperties.validatePlugin(result, context)
-      .filter {
-        !it.message.contains("Service preloading is deprecated in the") && !it.message.contains("Plugin has no dependencies")
-      }
-    if (problems.isNotEmpty()) {
-      val id = (pluginManager.createPlugin(path, validateDescriptor = false) as? PluginCreationSuccess)?.plugin?.pluginId
-      context.messages.reportBuildProblem(problems.joinToString(
+private fun validatePlugin(path: Path, context: BuildContext, span: Span) {
+  val pluginManager = IdePluginManager.createManager()
+  val result = pluginManager.createPlugin(path, validateDescriptor = true)
+  // todo fix AddStatisticsEventLogListenerTemporary
+  val id = when (result) {
+    is PluginCreationSuccess -> result.plugin.pluginId
+    is PluginCreationFail -> (pluginManager.createPlugin(path, validateDescriptor = false) as? PluginCreationSuccess)?.plugin?.pluginId
+  }
+  val problems = context.productProperties.validatePlugin(id, result, context)
+  if (problems.isNotEmpty()) {
+    span.addEvent("failed", Attributes.of(AttributeKey.stringKey("path"), "$path"))
+    context.messages.reportBuildProblem(
+      problems.joinToString(
         prefix = "${id ?: path}: ",
         separator = ". ",
-      ), identity = "${id ?: path}")
-    }
+      ), identity = "${id ?: path}"
+    )
   }
 }
 
@@ -809,28 +811,6 @@ fun getOsAndArchSpecificDistDirectory(osFamily: OsFamily, arch: JvmArchitecture,
 }
 
 private fun checkOutputOfPluginModules(mainPluginModule: String, includedModules: Collection<ModuleItem>, moduleExcludes: Map<String, List<String>>, context: BuildContext) {
-  // don't check modules which are not direct children of lib/ directory
-  val modulesWithPluginXml = mutableListOf<String>()
-  for (item in includedModules) {
-    if (!item.relativeOutputFile.contains('/')) {
-      val moduleName = item.moduleName
-      if (containsFileInOutput(moduleName = moduleName,
-                               filePath = "META-INF/plugin.xml",
-                               excludes = moduleExcludes[moduleName] ?: emptyList(),
-                               context = context)) {
-        modulesWithPluginXml.add(moduleName)
-      }
-    }
-  }
-
-  check(!modulesWithPluginXml.isEmpty()) {
-    "No module from \'$mainPluginModule\' plugin contains plugin.xml"
-  }
-  check(modulesWithPluginXml.size == 1) {
-    "Multiple modules (${modulesWithPluginXml.joinToString()}) from \'$mainPluginModule\' plugin " +
-    "contain plugin.xml files so the plugin won\'t work properly"
-  }
-
   for (module in includedModules.asSequence().map { it.moduleName }.distinct()) {
     if (module == "intellij.java.guiForms.rt" ||
         !containsFileInOutput(moduleName = module,
@@ -892,7 +872,7 @@ private suspend fun scramble(platform: PlatformLayout, context: BuildContext) {
   }
 }
 
-private fun CoroutineScope.createBuildBrokenPluginListJob(context: BuildContext): Job? {
+private fun CoroutineScope.createBuildBrokenPluginListJob(context: BuildContext): Job {
   val buildString = context.fullBuildNumber
   return createSkippableJob(
     spanBuilder("build broken plugin list").setAttribute("buildNumber", buildString),
@@ -906,7 +886,7 @@ private fun CoroutineScope.createBuildBrokenPluginListJob(context: BuildContext)
   }
 }
 
-private fun CoroutineScope.createBuildThirdPartyLibraryListJob(entries: Sequence<DistributionFileEntry>, context: BuildContext): Job? {
+private fun CoroutineScope.createBuildThirdPartyLibraryListJob(entries: Sequence<DistributionFileEntry>, context: BuildContext): Job {
   return createSkippableJob(spanBuilder("generate table of licenses for used third-party libraries"),
                             BuildOptions.THIRD_PARTY_LIBRARIES_LIST_STEP, context) {
     val generator = createLibraryLicensesListGenerator(
@@ -1377,6 +1357,8 @@ suspend fun createIdeClassPath(platform: PlatformLayout, context: BuildContext):
         }
       }
       is LibraryFileEntry -> classPath.add(entry.libraryFile!!)
+      is CustomAssetEntry -> {
+      }
       else -> throw UnsupportedOperationException("Entry $entry is not supported")
     }
   }

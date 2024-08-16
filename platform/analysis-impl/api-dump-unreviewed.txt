@@ -869,11 +869,6 @@ f:com.intellij.codeInsight.daemon.impl.SeverityRegistrar$SeverityBasedTextAttrib
 - getSeverity():com.intellij.lang.annotation.HighlightSeverity
 - getType():com.intellij.codeInsight.daemon.impl.HighlightInfoType$HighlightInfoTypeImpl
 - hashCode():I
-f:com.intellij.codeInsight.daemon.impl.TextEditorBackgroundHighlighter
-- com.intellij.codeHighlighting.BackgroundEditorHighlighter
-- <init>(com.intellij.openapi.project.Project,com.intellij.openapi.editor.Editor):V
-- createPassesForEditor():com.intellij.codeHighlighting.TextEditorHighlightingPass[]
-- f:getPasses(I[]):java.util.List
 f:com.intellij.codeInsight.daemon.impl.TextEditorHighlightingPassRegistrarImpl
 - com.intellij.codeHighlighting.TextEditorHighlightingPassRegistrar
 - sf:EP_NAME:com.intellij.openapi.extensions.ExtensionPointName
@@ -939,6 +934,7 @@ a:com.intellij.codeInsight.daemon.impl.actions.AbstractBatchSuppressByNoInspecti
 - p:setText(java.lang.String):V
 c:com.intellij.codeInsight.daemon.impl.actions.DisableHighlightingIntentionAction
 - com.intellij.codeInspection.IntentionAndQuickFixAction
+- com.intellij.openapi.project.DumbAware
 - <init>(java.lang.String):V
 - applyFix(com.intellij.openapi.project.Project,com.intellij.psi.PsiFile,com.intellij.openapi.editor.Editor):V
 - getFamilyName():java.lang.String
@@ -2967,6 +2963,7 @@ c:com.intellij.codeInspection.ex.LocalInspectionToolWrapper
 - getAlternativeID():java.lang.String
 - getID():java.lang.String
 - getJobDescriptors(com.intellij.codeInspection.GlobalInspectionContext):com.intellij.codeInspection.ex.JobDescriptor[]
+- isDumbAware():Z
 - isUnfair():Z
 - runForWholeFile():Z
 f:com.intellij.codeInspection.ex.MetaInformation
@@ -4213,38 +4210,6 @@ com.intellij.psi.impl.source.tree.injected.InjectedFileViewProvider
 f:com.intellij.psi.impl.source.tree.injected.InjectedLanguageEditorUtil
 - <init>():V
 - s:getTopLevelEditor(com.intellij.openapi.editor.Editor):com.intellij.openapi.editor.Editor
-f:com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl
-- com.intellij.lang.injection.InjectedLanguageManager
-- com.intellij.openapi.Disposable
-- <init>(com.intellij.openapi.project.Project):V
-- s:checkInjectorsAreDisposed(com.intellij.openapi.project.Project):V
-- s:clearInvalidInjections(com.intellij.psi.PsiFile):V
-- dispose():V
-- s:disposeInvalidEditors():V
-- dropFileCaches(com.intellij.psi.PsiFile):V
-- enumerate(com.intellij.psi.PsiElement,com.intellij.psi.PsiLanguageInjectionHost$InjectedPsiVisitor):V
-- enumerateEx(com.intellij.psi.PsiElement,com.intellij.psi.PsiFile,Z,com.intellij.psi.PsiLanguageInjectionHost$InjectedPsiVisitor):V
-- findInjectedElementAt(com.intellij.psi.PsiFile,I):com.intellij.psi.PsiElement
-- freezeWindow(com.intellij.injected.editor.DocumentWindow):com.intellij.injected.editor.DocumentWindow
-- getCachedInjectedDocumentsInRange(com.intellij.psi.PsiFile,com.intellij.openapi.util.TextRange):java.util.List
-- getInjectedPsiFiles(com.intellij.psi.PsiElement):java.util.List
-- getInjectionHost(com.intellij.psi.FileViewProvider):com.intellij.psi.PsiLanguageInjectionHost
-- getInjectionHost(com.intellij.psi.PsiElement):com.intellij.psi.PsiLanguageInjectionHost
-- s:getInstanceImpl(com.intellij.openapi.project.Project):com.intellij.psi.impl.source.tree.injected.InjectedLanguageManagerImpl
-- getNonEditableFragments(com.intellij.injected.editor.DocumentWindow):java.util.List
-- getTopLevelFile(com.intellij.psi.PsiElement):com.intellij.psi.PsiFile
-- getUnescapedText(com.intellij.psi.PsiElement):java.lang.String
-- injectedToHost(com.intellij.psi.PsiElement,I):I
-- injectedToHost(com.intellij.psi.PsiElement,I,Z):I
-- injectedToHost(com.intellij.psi.PsiElement,com.intellij.openapi.util.TextRange):com.intellij.openapi.util.TextRange
-- intersectWithAllEditableFragments(com.intellij.psi.PsiFile,com.intellij.openapi.util.TextRange):java.util.List
-- isInjectedViewProvider(com.intellij.psi.FileViewProvider):Z
-- mapInjectedOffsetToUnescaped(com.intellij.psi.PsiFile,I):I
-- mapUnescapedOffsetToInjected(com.intellij.psi.PsiFile,I):I
-- mightHaveInjectedFragmentAtOffset(com.intellij.openapi.editor.Document,I):Z
-- processInjectableElements(java.util.Collection,com.intellij.util.Processor):V
-- s:pushInjectors(com.intellij.openapi.project.Project):V
-- registerMultiHostInjector(com.intellij.lang.injection.MultiHostInjector,com.intellij.openapi.Disposable):V
 a:com.intellij.psi.impl.source.tree.injected.InjectedReferenceVisitor
 - com.intellij.psi.PsiLanguageInjectionHost$InjectedPsiVisitor
 - <init>():V

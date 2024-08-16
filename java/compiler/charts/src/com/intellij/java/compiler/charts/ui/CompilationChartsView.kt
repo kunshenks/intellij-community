@@ -19,11 +19,10 @@ class CompilationChartsView(project: Project, private val vm: CompilationChartsV
     val scroll = object : JBScrollPane() {
       override fun createViewport(): JViewport = CompilationChartsViewport(zoom)
     }.apply {
-      horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED
+      horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS
       verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
       border = JBUI.Borders.empty()
       viewport.scrollMode = JViewport.SIMPLE_SCROLL_MODE
-      horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_ALWAYS
       name = "compilation-charts-scroll-pane"
     }
     val rightAdhesionScrollBarListener = RightAdhesionScrollBarListener(scroll.viewport)
@@ -48,7 +47,6 @@ class CompilationChartsView(project: Project, private val vm: CompilationChartsV
       diagrams.statistic.time(vm.modules.end)
       diagrams.statistic.thread(vm.modules.threadCount)
 
-      diagrams.updateView()
       panel.updateLabel(vm.modules.get().keys, vm.filter.value)
     }
 
@@ -58,8 +56,6 @@ class CompilationChartsView(project: Project, private val vm: CompilationChartsV
 
       diagrams.statistic.cpu(statistics.newValueOpt?.data)
       diagrams.statistic.time(statistics.newValueOpt?.time)
-
-      if (vm.cpuMemory.value == CPU) diagrams.updateView()
     }
 
     vm.statistics.memoryUsed.advise(vm.lifetime) { statistics ->
@@ -70,17 +66,16 @@ class CompilationChartsView(project: Project, private val vm: CompilationChartsV
       diagrams.statistic.maxMemory = vm.statistics.maxMemory
       diagrams.statistic.time(statistics.newValueOpt?.time)
 
-      if (vm.cpuMemory.value == MEMORY) diagrams.updateView()
     }
 
     vm.filter.advise(vm.lifetime) { filter ->
       diagrams.modules.filter = filter
-      diagrams.forceRepaint()
+      diagrams.smartDraw()
     }
 
     vm.cpuMemory.advise(vm.lifetime) { filter ->
       diagrams.cpuMemory = filter
-      diagrams.forceRepaint()
+      diagrams.smartDraw()
     }
 
     vm.scrollToEndEvent.advise(vm.lifetime) { _ ->

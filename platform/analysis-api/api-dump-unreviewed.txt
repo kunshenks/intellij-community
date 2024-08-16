@@ -461,7 +461,6 @@ com.intellij.codeInsight.daemon.GroupNames
 - sf:PROPERTIES_GROUP_NAME:java.lang.String
 - sf:STYLE_GROUP_NAME:java.lang.String
 f:com.intellij.codeInsight.daemon.HighlightDisplayKey
-- <init>(java.lang.String,java.lang.String):V
 - s:find(java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
 - s:findById(java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
 - s:findOrRegister(java.lang.String,java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
@@ -469,6 +468,7 @@ f:com.intellij.codeInsight.daemon.HighlightDisplayKey
 - s:getAlternativeID(com.intellij.codeInsight.daemon.HighlightDisplayKey):java.lang.String
 - s:getDisplayNameByKey(com.intellij.codeInsight.daemon.HighlightDisplayKey):java.lang.String
 - getID():java.lang.String
+- getShortName():java.lang.String
 - s:register(java.lang.String,com.intellij.openapi.util.Computable,java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
 - s:register(java.lang.String,com.intellij.openapi.util.Computable,java.lang.String,java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
 - s:register(java.lang.String,java.lang.String,java.lang.String):com.intellij.codeInsight.daemon.HighlightDisplayKey
@@ -1262,7 +1262,7 @@ a:com.intellij.codeInspection.InspectionProfileEntry
 - s:getShortName(java.lang.String):java.lang.String
 - getStaticDescription():java.lang.String
 - getSuppressId():java.lang.String
-- s:getSuppressors(com.intellij.psi.PsiElement):java.util.Set
+- s:getSuppressors(com.intellij.psi.PsiElement):java.util.Collection
 - initialize(com.intellij.codeInspection.GlobalInspectionContext):V
 - isEnabledByDefault():Z
 - isInitialized():Z
@@ -1272,6 +1272,7 @@ a:com.intellij.codeInspection.InspectionProfileEntry
 - showDefaultConfigurationOptions():Z
 - writeSettings(org.jdom.Element):V
 com.intellij.codeInspection.InspectionSuppressor
+- com.intellij.openapi.project.PossiblyDumbAware
 - a:getSuppressActions(com.intellij.psi.PsiElement,java.lang.String):com.intellij.codeInspection.SuppressQuickFix[]
 - a:isSuppressedFor(com.intellij.psi.PsiElement,java.lang.String):Z
 com.intellij.codeInspection.InspectionToolProvider
@@ -1314,6 +1315,7 @@ c:com.intellij.codeInspection.LocalInspectionEP
 - com.intellij.codeInspection.InspectionEP
 - sf:LOCAL_INSPECTION:com.intellij.openapi.extensions.ExtensionPointName
 - alternativeId:java.lang.String
+- dumbAware:Z
 - dynamicGroup:Z
 - id:java.lang.String
 - runForWholeFile:Z
@@ -1327,6 +1329,7 @@ c:com.intellij.codeInspection.LocalInspectionEP
 - a:getGroupKey():java.lang.String
 a:com.intellij.codeInspection.LocalInspectionTool
 - com.intellij.codeInspection.InspectionProfileEntry
+- com.intellij.openapi.project.PossiblyDumbAware
 - sf:EMPTY_ARRAY:com.intellij.codeInspection.LocalInspectionTool[]
 - sf:VALID_ID_PATTERN:java.lang.String
 - <init>():V
@@ -1586,10 +1589,10 @@ a:com.intellij.codeInspection.ex.InspectionToolWrapper
 - a:createCopy():com.intellij.codeInspection.ex.InspectionToolWrapper
 - getDefaultEditorAttributes():java.lang.String
 - getDefaultLevel():com.intellij.codeHighlighting.HighlightDisplayLevel
-- getDescriptionContextClass():java.lang.Class
+- f:getDescriptionContextClass():java.lang.Class
 - getDisplayKey():com.intellij.codeInsight.daemon.HighlightDisplayKey
 - getDisplayName():java.lang.String
-- getExtension():com.intellij.codeInspection.InspectionEP
+- f:getExtension():com.intellij.codeInspection.InspectionEP
 - f:getFolderName():java.lang.String
 - getGroupDisplayName():java.lang.String
 - getGroupPath():java.lang.String[]

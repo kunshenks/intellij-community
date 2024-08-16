@@ -96,6 +96,10 @@ private val LOG = logger<DynamicPlugins>()
 private val classloadersFromUnloadedPlugins = mutableMapOf<PluginId, WeakList<PluginClassLoader>>()
 
 object DynamicPlugins {
+  private var myProcessRun = 0
+  private val myProcessCallbacks = mutableListOf<Runnable>()
+  private val myLock = Any()
+
   @JvmStatic
   @JvmOverloads
   fun allowLoadUnloadWithoutRestart(descriptor: IdeaPluginDescriptorImpl,
@@ -112,8 +116,10 @@ object DynamicPlugins {
    * @return true if the requested enabled state was applied without restart, false if restart is required
    */
   fun loadPlugins(descriptors: Collection<IdeaPluginDescriptorImpl>, project: Project?): Boolean {
-    return updateDescriptorsWithoutRestart(descriptors, load = true) {
-      loadPlugin(it, project)
+    return runProcess {
+      updateDescriptorsWithoutRestart(descriptors, load = true) {
+        doLoadPlugin(it, project)
+      }
     }
   }
 
@@ -126,8 +132,40 @@ object DynamicPlugins {
     parentComponent: JComponent? = null,
     options: UnloadPluginOptions = UnloadPluginOptions(disable = true),
   ): Boolean {
-    return updateDescriptorsWithoutRestart(descriptors, load = false) {
-      unloadPluginWithProgress(project, parentComponent, it, options)
+    return runProcess {
+      updateDescriptorsWithoutRestart(descriptors, load = false) {
+        doUnloadPluginWithProgress(project, parentComponent, it, options)
+      }
+    }
+  }
+
+  private fun runProcess(process: () -> Boolean): Boolean {
+    try {
+      synchronized(myLock) {
+        myProcessRun++
+      }
+      return process.invoke()
+    }
+    finally {
+      val callbacks = mutableListOf<Runnable>()
+      synchronized(myLock) {
+        myProcessRun--
+        callbacks.addAll(myProcessCallbacks)
+        myProcessCallbacks.clear()
+      }
+      callbacks.forEach { it.run() }
+    }
+  }
+
+  fun runAfter(runAlways: Boolean, callback: Runnable) {
+    synchronized(myLock) {
+      if (myProcessRun > 0) {
+        myProcessCallbacks.add(callback)
+        return
+      }
+    }
+    if (runAlways) {
+      callback.run()
     }
   }
 
@@ -386,6 +424,15 @@ object DynamicPlugins {
                                parentComponent: JComponent?,
                                pluginDescriptor: IdeaPluginDescriptorImpl,
                                options: UnloadPluginOptions): Boolean {
+    return runProcess {
+      doUnloadPluginWithProgress(project, parentComponent, pluginDescriptor, options)
+    }
+  }
+
+  private fun doUnloadPluginWithProgress(project: Project? = null,
+                                         parentComponent: JComponent?,
+                                         pluginDescriptor: IdeaPluginDescriptorImpl,
+                                         options: UnloadPluginOptions): Boolean {
     var result = false
     if (options.save) {
       runInAutoSaveDisabledMode {
@@ -446,7 +493,9 @@ object DynamicPlugins {
   @JvmOverloads
   fun unloadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl,
                    options: UnloadPluginOptions = UnloadPluginOptions(disable = true)): Boolean {
-    return unloadPluginWithProgress(project = null, parentComponent = null, pluginDescriptor, options)
+    return runProcess {
+      doUnloadPluginWithProgress(project = null, parentComponent = null, pluginDescriptor, options)
+    }
   }
 
   private fun unloadPluginWithoutProgress(pluginDescriptor: IdeaPluginDescriptorImpl,
@@ -822,6 +871,12 @@ object DynamicPlugins {
 
   @JvmOverloads
   fun loadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl, project: Project? = null): Boolean {
+    return runProcess {
+      doLoadPlugin(pluginDescriptor, project)
+    }
+  }
+
+  private fun doLoadPlugin(pluginDescriptor: IdeaPluginDescriptorImpl, project: Project? = null): Boolean {
     var result = false
     val indicator = PotemkinProgress(IdeBundle.message("plugins.progress.loading.plugin.title", pluginDescriptor.name),
                                      project,

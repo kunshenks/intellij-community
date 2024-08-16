@@ -1,12 +1,13 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.ide.ui
 
+import com.dd.plist.NSDictionary
+import com.dd.plist.PropertyListParser
 import com.intellij.DynamicBundle
 import com.intellij.icons.AllIcons
 import com.intellij.ide.LanguageAndRegionBundle
 import com.intellij.ide.Region
 import com.intellij.ide.RegionSettings
-import com.intellij.ide.file.PListBuddyWrapper
 import com.intellij.ide.gdpr.EndUserAgreement
 import com.intellij.ide.ui.localization.statistics.EventSource
 import com.intellij.ide.ui.localization.statistics.LocalizationActionsStatistics
@@ -33,6 +34,7 @@ import org.jetbrains.annotations.Nls
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Graphics
+import java.io.File
 import java.util.*
 import javax.swing.*
 import javax.swing.border.Border
@@ -228,12 +230,15 @@ private fun getLocaleFromGeneralPrefMacOs(rootPath: String): Region? {
   val generalPath = "/Library/Preferences/.GlobalPreferences.plist"
   val fullPath = rootPath + generalPath
   try {
-    val readData = PListBuddyWrapper(fullPath).readData("AppleLocale")
-    val elementsByTagName = readData.getElementsByTagName("string")
-    val localeText = elementsByTagName.item(0).textContent
-    val regionText = localeText.substringAfter("@rg=", "")
+    val file = File(fullPath)
+    val rootDict = PropertyListParser.parse(file) as? NSDictionary ?: return null
+    val localeText = rootDict.get("AppleLocale")?.toString() ?: return null
+    var regionText = localeText.substringAfter("@rg=", "")
     if (regionText.isNotEmpty()) {
-      return regionMapping.keys.find { regionText.startsWith(regionMapping[it]!!, true) }
+      return regionMapping.keys.find { regionText.startsWith(regionMapping[it]!!, true) } ?: Region.NOT_SET
+    } else {
+      regionText = localeText.substringAfter("_", "")
+      return regionMapping.keys.find { regionText.startsWith(regionMapping[it]!!) } ?: Region.NOT_SET
     }
     return Region.NOT_SET
   }

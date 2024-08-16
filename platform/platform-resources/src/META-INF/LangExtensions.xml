@@ -97,7 +97,7 @@
                                          id="projectIndexStartup"/>
     <requiredForSmartModeStartupActivity implementation="com.intellij.util.indexing.DumbModeWhileScanningSubscriber"/>
     <initProjectActivity id="dumbServiceStartup" implementation="com.intellij.openapi.project.DumbServiceStartupActivity" order="last"/>
-    <initProjectActivity id="vfsStartup" implementation="com.intellij.psi.impl.file.impl.PsiVFSListener$MyStartUpActivity" order="first"/>
+    <initProjectActivity id="vfsStartup" implementation="com.intellij.psi.impl.file.impl.PsiVfsInitProjectActivity" order="first"/>
 
     <applicationService serviceInterface="com.intellij.util.indexing.EntityIndexingService"
                         serviceImplementation="com.intellij.util.indexing.EntityIndexingServiceImpl"/>
@@ -209,7 +209,7 @@
 
     <applicationService serviceImplementation="com.intellij.codeInsight.intention.impl.config.IntentionManagerSettings"/>
     <search.optionContributor
-      implementation="com.intellij.codeInsight.intention.impl.config.IntentionManagerSettings$IntentionSearchableOptionContributor"/>
+      implementation="com.intellij.codeInsight.intention.impl.config.IntentionSearchableOptionContributor"/>
 
     <applicationService serviceInterface="com.intellij.find.FindSettings"
                         serviceImplementation="com.intellij.find.impl.LangFindSettingsImpl"/>
@@ -808,7 +808,7 @@
     <statementUpDownMover implementation="com.intellij.codeInsight.editorActions.moveUpDown.LineMover" id="line" order="last"/>
 
     <enterHandlerDelegate implementation="com.intellij.codeInsight.editorActions.enter.EnterInStringLiteralHandler"/>
-    <enterHandlerDelegate implementation="com.intellij.codeInsight.editorActions.enter.EnterInLineCommentHandler"/>
+    <enterHandlerDelegate implementation="com.intellij.codeInsight.editorActions.enter.EnterInLineCommentHandler" id="EnterInLineCommentHandler"/>
     <enterHandlerDelegate implementation="com.intellij.codeInsight.editorActions.enter.EnterInBlockCommentHandler" id="blockComment"
                           order="last"/>
     <enterHandlerDelegate implementation="com.intellij.codeInsight.editorActions.enter.EnterAfterUnmatchedBraceHandler"
@@ -948,7 +948,7 @@
     <editorActionHandler action="EditorSelectWord" implementationClass="com.intellij.codeInsight.editorActions.SelectWordHandler"
                          id="psi.select.word"/>
     <editorActionHandler action="EditorSelectWord" implementationClass="com.intellij.openapi.editor.actions.SelectWordAtCaretAction$Handler"
-                         id="indent.guide.select.word" order=" before psi.select.word"/>
+                         id="indent.guide.select.word" order="before psi.select.word"/>
     <editorActionHandler action="EditorUnSelectWord" implementationClass="com.intellij.codeInsight.editorActions.UnSelectWordHandler"
                          id="psi.unselect.word"/>
     <editorActionHandler action="EditorPaste" implementationClass="com.intellij.codeInsight.editorActions.PasteHandler"/>
@@ -1162,6 +1162,8 @@
     <applicationService serviceImplementation="com.intellij.ConfigurableFactory"/>
 
     <applicationService serviceImplementation="com.intellij.ide.todo.TodoConfiguration"/>
+    <statistics.applicationUsagesCollector implementation="com.intellij.ide.todo.TodoConfigurationCollector"/>
+
     <indexPatternSearch implementation="com.intellij.psi.impl.search.IndexPatternSearcher"/>
     <indexPatternProvider implementation="com.intellij.ide.todo.TodoIndexPatternProvider"/>
 
@@ -1174,6 +1176,7 @@
     <statistics.counterUsagesCollector implementationClass="com.intellij.webcore.packaging.PackageManagementUsageCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.codeInsight.lookup.impl.LookupUsageTracker"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.codeInsight.inline.completion.logs.InlineCompletionUsageTracker"/>
+    <statistics.counterUsagesCollector implementationClass="com.intellij.codeInsight.inline.completion.logs.InlineCompletionLogs"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.find.findUsages.FindUsagesStatisticsCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.usages.impl.UsageViewStatisticsCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.intellij.openapi.fileTypes.impl.FileTypeConfigurableInteractions"/>
@@ -1307,6 +1310,10 @@
     <pathMacroFilter implementation="com.intellij.openapi.application.PathMappingsMacroFilter"/>
 
     <postStartupActivity implementation="com.intellij.codeInsight.highlighting.BackgroundHighlighterProjectActivity"/>
+    <registryKey defaultValue="true" description="Enables Usage highlighting under caret in dumb mode"
+                 key="identifier.highlighter.pass.in.dumb.mode"/>
+    <registryKey defaultValue="true" description="Enables inspections in dumb mode" key="ide.dumb.aware.inspections"/>
+
     <usageContextPanelProvider implementation="com.intellij.usages.impl.UsagePreviewPanel$Provider"/>
     <usageContextPanelProvider implementation="com.intellij.usageView.impl.UsageContextCallHierarchyPanel$Provider"/>
     <fileDocumentSynchronizationVetoer implementation="com.intellij.codeInsight.lookup.impl.LookupDocumentSavingVetoer"/>
@@ -1630,7 +1637,6 @@
 
     <projectService serviceInterface="com.intellij.codeInsight.daemon.impl.HectorComponentFactory"
                     serviceImplementation="com.intellij.codeInsight.daemon.impl.HectorComponentFactoryImpl"/>
-    <editorFactoryListener implementation="com.intellij.internal.statistic.fileTypes.UpdateComponentEditorListener"/>
 
     <toolWindow id="Problems View" anchor="bottom" icon="AllIcons.Toolwindows.ToolWindowProblemsEmpty" canCloseContents="true"
                 factoryClass="com.intellij.analysis.problemsView.toolWindow.ProblemsView"/>
@@ -1791,7 +1797,7 @@
               topic="com.intellij.codeInsight.lookup.LookupManagerListener"/>
     <listener class="com.intellij.lang.documentation.ide.impl.DocumentationAutoPopupListener"
               topic="com.intellij.codeInsight.lookup.LookupManagerListener"/>
-    <listener class="com.intellij.psi.impl.file.impl.PsiVFSListener$MyModuleRootListener"
+    <listener class="com.intellij.psi.impl.file.impl.PsiVFSModuleRootListener"
               topic="com.intellij.openapi.roots.ModuleRootListener"/>
     <listener class="com.intellij.workspaceModel.ide.impl.legacyBridge.facet.FacetEntityChangeListener$WorkspaceModelListener"
               topic="com.intellij.platform.backend.workspace.WorkspaceModelChangeListener"/>

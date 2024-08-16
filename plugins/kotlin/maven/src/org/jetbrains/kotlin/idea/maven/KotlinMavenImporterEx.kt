@@ -1,6 +1,7 @@
 // Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package org.jetbrains.kotlin.idea.maven
 
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.platform.workspace.jps.entities.LibraryDependency
 import com.intellij.platform.workspace.jps.entities.ModuleEntity
@@ -113,6 +114,7 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
         kotlinFacetSettings.useProjectSettings = false
 
         // configure facet
+        LOG.debug("Configuring facet")
         with(kotlinFacetSettings) {
             this.compilerArguments = null
             this.targetPlatform = null
@@ -132,6 +134,7 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
             val commonArguments = KotlinCommonCompilerArgumentsHolder.getInstance(project).settings
             if (compilerArguments == null) {
                 val targetPlatform = platform ?: getDefaultTargetPlatform(project)
+                LOG.debug("Detected target platform ", targetPlatform)
 
                 val argumentsForPlatform = IdePlatformKindProjectStructure.getInstance(project)
                     .getCompilerArguments(targetPlatform.idePlatformKind)
@@ -158,6 +161,7 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
             if (shouldInferLanguageLevel) {
                 languageLevel = (if (useProjectSettings) LanguageVersion.fromVersionString(commonArguments.languageVersion) else null)
                     ?: getDefaultLanguageLevel(compilerVersion, coerceRuntimeLibraryVersionToReleased = false)
+                LOG.debug("Inferred languageLevel to ", languageLevel)
             }
 
             if (shouldInferAPILevel) {
@@ -181,6 +185,7 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
                         languageLevel
                     }
                 }
+                LOG.debug("Inferred apiLevel to ", apiLevel)
             }
             // end of initialize
             this.pureKotlinSourceFolders = pureKotlinSourceFolders
@@ -193,6 +198,7 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
         val executionArguments = mavenPlugin.executions
             ?.firstOrNull { it.goals.any { s -> s in compilationGoals } }
             ?.configurationElement?.let { getCompilerArgumentsByConfigurationElement(mavenProject, it, configuredPlatform, project) }
+        LOG.debug("Parsing compiler arguments: ", sharedArguments.args)
         parseCompilerArgumentsToFacetSettings(sharedArguments.args, kotlinFacetSettings, null) //modifiableModelsProvider -> null
         if (executionArguments != null) {
             parseCompilerArgumentsToFacetSettings(executionArguments.args, kotlinFacetSettings, null) //modifiableModelsProvider -> null
@@ -249,5 +255,9 @@ class KotlinMavenImporterEx : KotlinMavenImporter(), MavenWorkspaceFacetConfigur
         val jvmTarget =
             Kotlin2JvmCompilerArgumentsHolder.getInstance(project).settings.jvmTarget?.let { JvmTarget.fromString(it) } ?: JvmTarget.JVM_1_8
         return JvmPlatforms.jvmPlatformByTargetVersion(jvmTarget)
+    }
+
+    companion object {
+        private val LOG = logger<KotlinMavenImporterEx>()
     }
 }

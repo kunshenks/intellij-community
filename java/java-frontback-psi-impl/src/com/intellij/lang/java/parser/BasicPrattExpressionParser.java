@@ -29,7 +29,6 @@ import static com.intellij.psi.impl.source.BasicElementTypes.*;
 @SuppressWarnings("UnnecessarilyQualifiedStaticUsage")
 @ApiStatus.Experimental
 public class BasicPrattExpressionParser {
-  static final int FORBID_LAMBDA_MASK = 0x1;
   private final Map<IElementType, ParserData> ourInfixParsers;
   private static final TokenSet THIS_OR_SUPER = TokenSet.create(JavaTokenType.THIS_KEYWORD, JavaTokenType.SUPER_KEYWORD);
   private static final TokenSet ID_OR_SUPER = TokenSet.create(JavaTokenType.IDENTIFIER, JavaTokenType.SUPER_KEYWORD);
@@ -41,7 +40,6 @@ public class BasicPrattExpressionParser {
   private static final TokenSet POSTFIX_OPS = TokenSet.create(JavaTokenType.PLUSPLUS, JavaTokenType.MINUSMINUS);
   private static final TokenSet PREF_ARITHMETIC_OPS = TokenSet.orSet(POSTFIX_OPS, TokenSet.create(JavaTokenType.PLUS, JavaTokenType.MINUS));
   private static final TokenSet PREFIX_OPS = TokenSet.orSet(PREF_ARITHMETIC_OPS, TokenSet.create(JavaTokenType.TILDE, JavaTokenType.EXCL));
-
 
   private static final int MULTIPLICATION_PRECEDENCE = 2;
   private static final int ADDITIVE_PRECEDENCE = 3;
@@ -418,7 +416,7 @@ public class BasicPrattExpressionParser {
     }
 
     if (tokenType == JavaTokenType.LPARENTH) {
-      if (!BitUtil.isSet(mode, FORBID_LAMBDA_MASK)) {
+      if (!BitUtil.isSet(mode, BasicExpressionParser.FORBID_LAMBDA_MASK)) {
         final PsiBuilder.Marker lambda = parseLambdaAfterParenth(builder);
         if (lambda != null) {
           return lambda;
@@ -433,10 +431,8 @@ public class BasicPrattExpressionParser {
         error(builder, JavaPsiBundle.message("expected.expression"));
       }
 
-      if (!expect(builder, JavaTokenType.RPARENTH)) {
-        if (inner != null) {
-          error(builder, JavaPsiBundle.message("expected.rparen"));
-        }
+      if (!expect(builder, JavaTokenType.RPARENTH) && inner != null) {
+        error(builder, JavaPsiBundle.message("expected.rparen"));
       }
 
       parenth.done(myJavaElementTypeContainer.PARENTH_EXPRESSION);
@@ -470,7 +466,7 @@ public class BasicPrattExpressionParser {
       builder.remapCurrentToken(tokenType = JavaTokenType.IDENTIFIER);
     }
     if (tokenType == JavaTokenType.IDENTIFIER) {
-      if (!BitUtil.isSet(mode, FORBID_LAMBDA_MASK) && builder.lookAhead(1) == JavaTokenType.ARROW) {
+      if (!BitUtil.isSet(mode, BasicExpressionParser.FORBID_LAMBDA_MASK) && builder.lookAhead(1) == JavaTokenType.ARROW) {
         return parseLambdaExpression(builder, false);
       }
 
@@ -825,14 +821,12 @@ public class BasicPrattExpressionParser {
         PsiBuilder.Marker marker = builder.mark();
         builder.advanceLexer();
         BasicReferenceParser.TypeInfo typeInfo = myParser.getReferenceParser().parseTypeInfo(
-          builder, BasicReferenceParser.EAT_LAST_DOT | BasicReferenceParser.ELLIPSIS | BasicReferenceParser.WILDCARD);
+          builder, BasicReferenceParser.ELLIPSIS | BasicReferenceParser.WILDCARD);
         if (typeInfo != null) {
           IElementType t = builder.getTokenType();
-          if (t == JavaTokenType.IDENTIFIER ||
-              t == JavaTokenType.THIS_KEYWORD ||
-              t == JavaTokenType.RPARENTH && builder.lookAhead(1) == JavaTokenType.ARROW) {
-            lambda = true;
-          }
+          lambda = t == JavaTokenType.IDENTIFIER ||
+                   t == JavaTokenType.THIS_KEYWORD ||
+                   t == JavaTokenType.RPARENTH && builder.lookAhead(1) == JavaTokenType.ARROW;
         }
         marker.rollbackTo();
 
@@ -882,21 +876,17 @@ public class BasicPrattExpressionParser {
     if (builder.rawLookup(1) == JavaTokenType.GT) {
       if (builder.rawLookup(2) == JavaTokenType.GT) {
         if (builder.rawLookup(3) == JavaTokenType.EQ) {
-          tokenType = JavaTokenType.GTGTGTEQ;
+          return JavaTokenType.GTGTGTEQ;
         }
-        else {
-          tokenType = JavaTokenType.GTGTGT;
-        }
+        return JavaTokenType.GTGTGT;
       }
-      else if (builder.rawLookup(2) == JavaTokenType.EQ) {
-        tokenType = JavaTokenType.GTGTEQ;
+      if (builder.rawLookup(2) == JavaTokenType.EQ) {
+        return JavaTokenType.GTGTEQ;
       }
-      else {
-        tokenType = JavaTokenType.GTGT;
-      }
+      return JavaTokenType.GTGT;
     }
     else if (builder.rawLookup(1) == JavaTokenType.EQ) {
-      tokenType = JavaTokenType.GE;
+      return JavaTokenType.GE;
     }
 
     return tokenType;
@@ -1000,14 +990,12 @@ public class BasicPrattExpressionParser {
       while (true) {
         advanceBinOpToken(builder, binOpType);
         PsiBuilder.Marker rhs = parser.tryParseWithPrecedenceAtMost(builder, currentPrecedence - 1, mode);
-        IElementType nextToken = getBinOpToken(builder);
-        if (rhs != null) {
-          operandCount++;
+        if (rhs == null) {
+          error(builder, JavaPsiBundle.message("expected.expression"));
         }
-        if (rhs == null || nextToken != binOpType) {
-          if (rhs == null) {
-            error(builder, JavaPsiBundle.message("expected.expression"));
-          }
+        operandCount++;
+        IElementType nextToken = getBinOpToken(builder);
+        if (nextToken != binOpType) {
           break;
         }
       }

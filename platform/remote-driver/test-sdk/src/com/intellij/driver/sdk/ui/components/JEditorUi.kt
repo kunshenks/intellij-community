@@ -4,10 +4,7 @@ import com.intellij.driver.client.Remote
 import com.intellij.driver.client.impl.DriverCallException
 import com.intellij.driver.model.OnDispatcher
 import com.intellij.driver.model.RemoteMouseButton
-import com.intellij.driver.sdk.DeclarativeInlayRenderer
-import com.intellij.driver.sdk.Document
-import com.intellij.driver.sdk.Editor
-import com.intellij.driver.sdk.logicalPosition
+import com.intellij.driver.sdk.*
 import com.intellij.driver.sdk.remoteDev.BeControlClass
 import com.intellij.driver.sdk.remoteDev.EditorComponentImplBeControlBuilder
 import com.intellij.driver.sdk.ui.Finder
@@ -82,13 +79,15 @@ class JEditorUiComponent(data: ComponentData) : UiComponent(data) {
   fun getCaretLine() = caretPosition.getLine() + 1
   fun getCaretColumn() = caretPosition.getColumn() + 1
 
+  fun getFontSize() = editor.getColorsScheme().getEditorFontSize()
+
   fun clickOn(text: String, button: RemoteMouseButton) {
     val o = this.text.indexOf(text) + text.length / 2
-    driver.withContext(OnDispatcher.EDT) {
-      val p = editor.offsetToVisualPosition(o)
-      val point = editor.visualPositionToXY(p)
-      robot.click(component, point, button, 1)
+    val point = interact {
+      val p = offsetToVisualPosition(o)
+      visualPositionToXY(p)
     }
+    robot.click(component, point, button, 1)
   }
 
   fun setCaretPosition(line: Int, column: Int) {
@@ -126,6 +125,10 @@ class JEditorUiComponent(data: ComponentData) : UiComponent(data) {
     driver.utility(IntentionActionUtils::class).invokeIntentionAction(editor, intentionActionName)
   }
 
+  fun invokeQuickFix(highlightInfo: HighlightInfo, name: String) {
+    driver.utility(IntentionActionUtils::class).invokeQuickFix(editor, highlightInfo, name)
+  }
+
   fun invokeAiIntentionAction(intentionActionName: String) {
     driver.utility(AiTestIntentionUtils::class).invokeAiAssistantIntention(editor, intentionActionName)
   }
@@ -134,6 +137,7 @@ class JEditorUiComponent(data: ComponentData) : UiComponent(data) {
 @Remote("com.jetbrains.performancePlugin.utils.IntentionActionUtils", plugin = "com.jetbrains.performancePlugin")
 interface IntentionActionUtils {
   fun invokeIntentionAction(editor: Editor, intentionActionName: String)
+  fun invokeQuickFix(editor: Editor, highlightInfo: HighlightInfo, name: String)
 }
 
 @Remote("com.intellij.ml.llm.intentions.TestIntentionUtils", plugin = "com.intellij.ml.llm/intellij.ml.llm.core")

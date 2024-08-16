@@ -75,6 +75,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
                 runTest("../../idea/tests/testData/editor/optimizeImports/jvm/allUnderImports/ClassNameConflictWithDefault.kt");
             }
 
+            @TestMetadata("ClassNameConflictWithDefault2.kt")
+            public void testClassNameConflictWithDefault2() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/jvm/allUnderImports/ClassNameConflictWithDefault2.kt");
+            }
+
             @TestMetadata("ClassNameConflictWithinDefaultImports.kt")
             public void testClassNameConflictWithinDefaultImports() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/jvm/allUnderImports/ClassNameConflictWithinDefaultImports.kt");
@@ -88,6 +93,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
             @TestMetadata("JavaAnnotationWithValueParameterIsProperlyResolved.kt")
             public void testJavaAnnotationWithValueParameterIsProperlyResolved() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/jvm/allUnderImports/JavaAnnotationWithValueParameterIsProperlyResolved.kt");
+            }
+
+            @TestMetadata("JavaAnnotationWithValueParameterIsProperlyResolved2.kt")
+            public void testJavaAnnotationWithValueParameterIsProperlyResolved2() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/jvm/allUnderImports/JavaAnnotationWithValueParameterIsProperlyResolved2.kt");
             }
 
             @TestMetadata("KotlinAnnotationWithSingleArgumentIsProperlyResolved.kt")
@@ -420,6 +430,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
             public void testExtensionForBaseClassViaChildClass() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/kDoc/extensionForBaseClassViaChildClass.kt");
             }
+
+            @TestMetadata("unresolvedNameInKDocDoesHoldImports.kt")
+            public void testUnresolvedNameInKDocDoesHoldImports() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/common/kDoc/unresolvedNameInKDocDoesHoldImports.kt");
+            }
         }
 
         @RunWith(JUnit3RunnerWithInners.class)
@@ -472,6 +487,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
 
             private void runTest(String testDataFilePath) throws Exception {
                 KotlinTestUtils.runTest(this::doTest, this, testDataFilePath);
+            }
+
+            @TestMetadata("AliasedImportFromObject.kt")
+            public void testAliasedImportFromObject() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/common/AliasedImportFromObject.kt");
             }
 
             @TestMetadata("ArrayAccessExpression.kt")
@@ -569,6 +589,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/Enums.kt");
             }
 
+            @TestMetadata("ExplicitImportIsNotRemovedToAvoidConflict.kt")
+            public void testExplicitImportIsNotRemovedToAvoidConflict() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/common/ExplicitImportIsNotRemovedToAvoidConflict.kt");
+            }
+
             @TestMetadata("ExtensionFunWithThisReference.kt")
             public void testExtensionFunWithThisReference() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/ExtensionFunWithThisReference.kt");
@@ -634,6 +659,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/FunctionalTypeVal_qualified.kt");
             }
 
+            @TestMetadata("ImplicitCompanionReceiverInClass.kt")
+            public void testImplicitCompanionReceiverInClass() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/common/ImplicitCompanionReceiverInClass.kt");
+            }
+
             @TestMetadata("InnerClassConstructor_superType.kt")
             public void testInnerClassConstructor_superType() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/InnerClassConstructor_superType.kt");
@@ -657,6 +687,11 @@ public abstract class FirJvmOptimizeImportsTestGenerated extends AbstractFirJvmO
             @TestMetadata("InvokeFunctionCallWithOverloadAmbiguity_literalReceiver.kt")
             public void testInvokeFunctionCallWithOverloadAmbiguity_literalReceiver() throws Exception {
                 runTest("../../idea/tests/testData/editor/optimizeImports/common/InvokeFunctionCallWithOverloadAmbiguity_literalReceiver.kt");
+            }
+
+            @TestMetadata("InvokeOnFunctionalTypeVsUnusedInvokeImport.kt")
+            public void testInvokeOnFunctionalTypeVsUnusedInvokeImport() throws Exception {
+                runTest("../../idea/tests/testData/editor/optimizeImports/common/InvokeOnFunctionalTypeVsUnusedInvokeImport.kt");
             }
 
             @TestMetadata("IteratorFunction.kt")

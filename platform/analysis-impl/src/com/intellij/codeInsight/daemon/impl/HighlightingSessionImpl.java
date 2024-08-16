@@ -246,6 +246,7 @@ public final class HighlightingSessionImpl implements HighlightingSession {
   }
 
   // return true if added
+  @Deprecated
   void addInfoIncrementally(@NotNull HighlightInfo info, @NotNull TextRange restrictedRange, int groupId) {
     BackgroundUpdateHighlightersUtil.addHighlighterToEditorIncrementally(this, getPsiFile(), getDocument(), restrictedRange,
                                                                          info, getColorsScheme(), groupId, myRange2markerCache);
@@ -315,7 +316,7 @@ public final class HighlightingSessionImpl implements HighlightingSession {
   }
 
   @Deprecated
-  void updateFileLevelHighlights(@NotNull List<? extends HighlightInfo> fileLevelHighlights, int group, boolean cleanOldHighlights, @NotNull HighlighterRecyclerPickup recycler) {
+  void updateFileLevelHighlights(@NotNull List<? extends HighlightInfo> fileLevelHighlights, int group, boolean cleanOldHighlights, @NotNull HighlighterRecycler recycler) {
     Project project = getProject();
     DaemonCodeAnalyzerEx codeAnalyzer = DaemonCodeAnalyzerEx.getInstanceEx(project);
     PsiFile psiFile = getPsiFile();
@@ -344,8 +345,7 @@ public final class HighlightingSessionImpl implements HighlightingSession {
     DaemonCodeAnalyzerEx codeAnalyzer = DaemonCodeAnalyzerEx.getInstanceEx(project);
     Future<?> future = EdtExecutorService.getInstance().submit(() -> {
       if (!project.isDisposed() && !isCanceled()) {
-        codeAnalyzer.removeFileLevelHighlight(getPsiFile(), oldFileLevelInfo);
-        codeAnalyzer.addFileLevelHighlight(oldFileLevelInfo.getGroup(), newFileLevelInfo, getPsiFile(), toReuse);
+        codeAnalyzer.replaceFileLevelHighlight( oldFileLevelInfo, newFileLevelInfo, getPsiFile(), toReuse);
       }
     });
     pendingFileLevelHighlightRequests.add((RunnableFuture<?>)future);

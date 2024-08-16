@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import org.jetbrains.annotations.ApiStatus.Internal
 import org.jetbrains.annotations.NonNls
+import org.jetbrains.annotations.TestOnly
 import java.awt.Color
 import java.util.*
 
@@ -34,7 +35,12 @@ open class RegistryValue @Internal constructor(
   private var booleanCachedValue: Boolean? = null
 
   open fun asString(): @NlsSafe String {
-    return checkNotNull(get(key = key, defaultValue = null, isValue = true)) { key }
+    var result = stringCachedValue
+    if (result == null) {
+      result = resolveRequiredValue(key)
+      stringCachedValue = result
+    }
+    return result
   }
 
   open fun asBoolean(): Boolean {
@@ -114,20 +120,19 @@ open class RegistryValue @Internal constructor(
   }
 
   private fun computeDouble(): Double {
-    try {
-      return get(key = key, defaultValue = "0.0", isValue = true)!!.toDouble()
-    }
-    catch (e: NumberFormatException) {
-      return registry.getBundleValue(key, keyDescriptor).toDouble()
-    }
+    return resolveNotRequiredValue(key)?.toDoubleOrNull()
+           ?: keyDescriptor?.defaultValue?.toDouble()
+           ?: registry.getBundleValueOrNull(key)?.toDouble()
+           ?: 0.0
   }
 
   fun asColor(defaultValue: Color?): Color? {
-    val s = get(key, null, true) ?: return defaultValue
+    val s = getAsValue(key) ?: return defaultValue
     val color = ColorHexUtil.fromHex(s, null)
     if (color != null && (key.endsWith(".color") || key.endsWith(".color.dark") || key.endsWith(".color.light"))) {
       return color
     }
+
     val rgb = s.split(',').dropLastWhile { it.isEmpty() }
     if (rgb.size == 3) {
       try {
@@ -140,37 +145,33 @@ open class RegistryValue @Internal constructor(
   }
 
   open val description: @NlsSafe String
-    get() = keyDescriptor?.description ?: get(key = "$key.description", defaultValue = "", isValue = false)!!
+    get() = keyDescriptor?.description ?: resolveNotRequiredValue(key = "$key.description") ?: ""
 
   open fun isRestartRequired(): Boolean {
-    if (keyDescriptor != null) {
+    if (keyDescriptor == null) {
+      return resolveNotRequiredValue(key = "$key.restartRequired").toBoolean()
+    }
+    else {
       return keyDescriptor.isRestartRequired
     }
-    return get(key = "$key.restartRequired", defaultValue = "false", isValue = false).toBoolean()
   }
 
-  open fun isChangedFromDefault(): Boolean = isChangedFromDefault(asString(), registry)
+  open fun isChangedFromDefault(): Boolean {
+    return (stringCachedValue ?: resolveNotRequiredValue(key)) != registry.getBundleValueOrNull(key)
+  }
 
   val pluginId: String?
     get() = keyDescriptor?.pluginId
 
-  fun isChangedFromDefault(newValue: String, registry: Registry): Boolean {
-    return newValue != registry.getBundleValueOrNull(key)
-  }
-
-  @Throws(MissingResourceException::class)
-  open fun get(key: @NonNls String, defaultValue: String?, isValue: Boolean): String? {
-    if (isValue) {
-      if (stringCachedValue == null) {
-        stringCachedValue = resolveRequiredValue(key)
-      }
-      return stringCachedValue
+  private fun getAsValue(key: @NonNls String): String? {
+    if (stringCachedValue == null) {
+      stringCachedValue = resolveNotRequiredValue(key)
     }
-    return resolveNotRequiredValue(key = key, defaultValue = defaultValue)
+    return stringCachedValue?.takeIf { it.isNotEmpty() }
   }
 
-  @Throws(MissingResourceException::class)
-  private fun resolveNotRequiredValue(key: @NonNls String, defaultValue: String?): String? {
+  @Internal
+  fun resolveNotRequiredValue(key: @NonNls String): String? {
     registry.getUserProperties().get(key)?.let {
       return it
     }
@@ -180,7 +181,7 @@ open class RegistryValue @Internal constructor(
     }
 
     checkIsLoaded(key)
-    return registry.getBundleValueOrNull(key) ?: defaultValue
+    return registry.getBundleValueOrNull(key)
   }
 
   @Throws(MissingResourceException::class)
@@ -235,7 +236,7 @@ open class RegistryValue @Internal constructor(
       listener.afterValueChanged(this)
     }
 
-    if (!isRestartRequired() && resolveNotRequiredValue(key = key, defaultValue = null) == registry.getBundleValueOrNull(key)) {
+    if (!isRestartRequired() && resolveNotRequiredValue(key) == registry.getBundleValueOrNull(key)) {
       registry.getUserProperties().remove(key)
     }
 
@@ -254,8 +255,9 @@ open class RegistryValue @Internal constructor(
     Disposer.register(parentDisposable) { setValue(prev) }
   }
 
+  @TestOnly
   fun setValue(value: String, parentDisposable: Disposable) {
-    val prev = asString()
+    val prev = stringCachedValue ?: resolveRequiredValue(key)
     setValue(value)
     Disposer.register(parentDisposable) { setValue(prev) }
   }

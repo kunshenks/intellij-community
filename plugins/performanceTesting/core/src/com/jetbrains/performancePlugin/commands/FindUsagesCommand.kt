@@ -7,7 +7,9 @@ import com.intellij.find.actions.findUsages
 import com.intellij.find.findUsages.FindUsagesOptions
 import com.intellij.find.usages.impl.searchTargets
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.smartReadAction
+import com.intellij.openapi.application.writeIntentReadAction
 import com.intellij.openapi.components.serviceAsync
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileEditorManager
@@ -21,6 +23,7 @@ import com.intellij.usages.Usage
 import com.intellij.usages.UsageView
 import com.intellij.usages.impl.UsageViewElementsListener
 import com.jetbrains.performancePlugin.PerformanceTestSpan
+import com.jetbrains.performancePlugin.commands.PerformanceCommand.CMD_PREFIX
 import com.sampullara.cli.Args
 import io.opentelemetry.api.trace.Span
 import io.opentelemetry.context.Context
@@ -73,11 +76,12 @@ class FindUsagesCommand(text: String, line: Int) : PerformanceCommandCoroutineAd
           throw Exception("No editor is opened")
         }
 
-        val offset = editor.caretModel.offset
+        val (offset, scope) = writeIntentReadAction {
+          Pair(editor.caretModel.offset, FindUsagesOptions.findScopeByName(project, null, options.scope))
+        }
 
         AdvancedSettings.setInt("ide.usages.page.size", Int.MAX_VALUE) //by default, it's 100; we need to find all usages to compare
         val popupPosition = JBPopupFactory.getInstance().guessBestPopupLocation(editor)
-        val scope = FindUsagesOptions.findScopeByName(project, null, options.scope)
 
         val element = smartReadAction(project) {
           if (GotoDeclarationAction.findElementToShowUsagesOf(editor, offset) == null) {
@@ -107,7 +111,7 @@ class FindUsagesCommand(text: String, line: Int) : PerformanceCommandCoroutineAd
           LOG.info("Command find usages is called on element $element")
 
           if (!elementName.isNullOrEmpty()) {
-            val foundElementName = (element as PsiNamedElement).name
+            val foundElementName = readAction { (element as PsiNamedElement).name }
             check(foundElementName != null && foundElementName == elementName) { "Found element name $foundElementName does not correspond to expected $elementName" }
           }
 
@@ -119,10 +123,12 @@ class FindUsagesCommand(text: String, line: Int) : PerformanceCommandCoroutineAd
           spanRef = spanBuilder.startSpan()
           scopeRef = spanRef!!.makeCurrent()
 
-          findUsagesFuture = ShowUsagesAction.startFindUsagesWithResult(element, popupPosition, editor, scope)
+          findUsagesFuture = writeIntentReadAction { ShowUsagesAction.startFindUsagesWithResult (element, popupPosition, editor, scope) }
         }
 
-        val searchTargets = PsiDocumentManager.getInstance(project).getPsiFile(editor.document)?.let { searchTargets(it, offset) }
+        val searchTargets = readAction {
+          PsiDocumentManager.getInstance(project).getPsiFile(editor.document)?.let { searchTargets(it, offset) }
+        }
         if (!searchTargets.isNullOrEmpty()) {
           val target = searchTargets.first()
 

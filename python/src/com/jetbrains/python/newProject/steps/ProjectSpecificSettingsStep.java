@@ -24,10 +24,10 @@ import com.intellij.util.ObjectUtils;
 import com.intellij.util.PathUtil;
 import com.intellij.util.PlatformUtils;
 import com.intellij.util.concurrency.annotations.RequiresEdt;
-import com.intellij.util.containers.ContainerUtil;
 import com.jetbrains.python.PyBundle;
 import com.jetbrains.python.configuration.PyConfigurableInterpreterList;
 import com.jetbrains.python.newProject.PyFrameworkProjectGenerator;
+import com.jetbrains.python.newProject.PyNewProjectSettings;
 import com.jetbrains.python.newProject.PythonProjectGenerator;
 import com.jetbrains.python.newProject.collector.InterpreterStatisticsInfo;
 import com.jetbrains.python.packaging.PyPackage;
@@ -39,7 +39,6 @@ import com.jetbrains.python.sdk.add.PyAddSdkGroupPanel;
 import com.jetbrains.python.sdk.add.PyAddSdkPanel;
 import com.jetbrains.python.sdk.add.v2.PythonInterpreterSelectionMode;
 import one.util.streamex.StreamEx;
-import org.jetbrains.annotations.Nls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -51,7 +50,7 @@ import java.util.List;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class ProjectSpecificSettingsStep<T> extends ProjectSettingsStepBase<T> implements DumbAware {
+public class ProjectSpecificSettingsStep<T extends PyNewProjectSettings> extends ProjectSettingsStepBase<T> implements DumbAware {
   private boolean myInstallFramework;
   private @Nullable PyAddSdkGroupPanel myInterpreterPanel;
   private @Nullable HideableDecorator myInterpretersDecorator;
@@ -222,11 +221,6 @@ public class ProjectSpecificSettingsStep<T> extends ProjectSettingsStepBase<T> i
     final PyFrameworkProjectGenerator frameworkGenerator = ObjectUtils.tryCast(myProjectGenerator, PyFrameworkProjectGenerator.class);
 
     if (frameworkGenerator != null) {
-      final String python3Error = validateFrameworkSupportsPython3(frameworkGenerator, sdk);
-      if (python3Error != null) {
-        setErrorText(python3Error);
-        return false;
-      }
 
       // Framework package check may be heavy in case of remote sdk and should not be called on AWT, pretend everything is OK for
       // remote and check for packages later
@@ -262,12 +256,6 @@ public class ProjectSpecificSettingsStep<T> extends ProjectSettingsStepBase<T> i
     return !PythonInterpreterTargetEnvironmentFactory.Companion.isMutable(targetConfig);
   }
 
-  private static @Nls String validateFrameworkSupportsPython3(@NotNull PyFrameworkProjectGenerator generator, @NotNull Sdk sdk) {
-    final String frameworkName = generator.getFrameworkTitle();
-    final boolean isPy3k = PythonSdkType.getLanguageLevelForSdk(sdk).isPy3K();
-    return isPy3k && !generator.supportsPython3() ? PyBundle.message("framework.not.supported.for.the.selected.interpreter", frameworkName)
-                                                  : null;
-  }
 
   private static @NotNull Pair<Boolean, List<String>> validateFramework(@NotNull PyFrameworkProjectGenerator generator, @NotNull Sdk sdk) {
     final List<String> warnings = new ArrayList<>();
@@ -318,7 +306,7 @@ public class ProjectSpecificSettingsStep<T> extends ProjectSettingsStepBase<T> i
 
     final List<Sdk> allExistingSdks = Arrays.asList(PyConfigurableInterpreterList.getInstance(null).getModel().getSdks());
     final List<Sdk> existingSdks = getValidPythonSdks(allExistingSdks);
-    final Sdk preferredSdk = getPreferredSdk(existingSdks);
+    final Sdk preferredSdk = existingSdks.stream().findFirst().orElse(null);
 
     final String newProjectPath = getProjectLocation();
     final PyAddNewEnvironmentPanel newEnvironmentPanel = new PyAddNewEnvironmentPanel(allExistingSdks, newProjectPath, preferredEnvironment);
@@ -359,18 +347,6 @@ public class ProjectSpecificSettingsStep<T> extends ProjectSettingsStepBase<T> i
     }
     return TextWithMnemonic.parse(PyBundle.message("python.sdk.python.interpreter.title.0", "[name]"))
       .replaceFirst("[name]", name);
-  }
-
-  private @Nullable Sdk getPreferredSdk(@NotNull List<Sdk> sdks) {
-    final PyFrameworkProjectGenerator projectGenerator = ObjectUtils.tryCast(getProjectGenerator(), PyFrameworkProjectGenerator.class);
-    final boolean onlyPython2 = projectGenerator != null && !projectGenerator.supportsPython3();
-    final Sdk preferred = ContainerUtil.getFirstItem(sdks);
-    if (preferred == null) return null;
-    if (onlyPython2 && !PythonSdkType.getLanguageLevelForSdk(preferred).isPython2()) {
-      final Sdk python2Sdk = PythonSdkType.findPython2Sdk(sdks);
-      return python2Sdk != null ? python2Sdk : preferred;
-    }
-    return preferred;
   }
 
   public static @NotNull List<Sdk> getValidPythonSdks(@NotNull List<Sdk> existingSdks) {

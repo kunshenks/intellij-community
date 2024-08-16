@@ -35,9 +35,8 @@ import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsage
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.retargetInternalUsages
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.retargetInternalUsagesForCopyFile
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.unMarkAllUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.K2MoveRenameUsageInfo.Companion.unMarkNonUpdatableUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.checkModuleDependencyConflictsForInternalUsages
-import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.checkVisibilityConflictsForInternalUsages
+import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.conflict.checkModuleDependencyConflictsForInternalUsages
+import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.conflict.checkVisibilityConflictsForInternalUsages
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.createCopyTarget
 import org.jetbrains.kotlin.idea.k2.refactoring.move.processor.createKotlinFile
 import org.jetbrains.kotlin.idea.refactoring.checkConflictsInteractively
@@ -165,15 +164,15 @@ class CopyKotlinDeclarationsHandler : AbstractCopyKotlinDeclarationsHandler() {
         val targetData = getTargetData(sourceData) ?: return
 
         for (element in elementsToCopy) {
-            markInternalUsages(element)
+            analyzeInModalWindow(elementsToCopy.first(), RefactoringBundle.message("refactoring.preprocess.usages.progress")) {
+                markInternalUsages(element, element)
+            }
         }
 
         val conflicts: MultiMap<PsiElement, String> =
             analyzeInModalWindow(elementsToCopy.first(), RefactoringBundle.message("detecting.possible.conflicts")) {
                 collectConflicts(sourceData, targetData)
             }
-
-        unMarkNonUpdatableUsages(elementsToCopy)
 
         project.checkConflictsInteractively(conflicts) {
             try {

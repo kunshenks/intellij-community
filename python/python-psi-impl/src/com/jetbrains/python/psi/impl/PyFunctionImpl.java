@@ -29,7 +29,10 @@ import com.jetbrains.python.documentation.docstrings.DocStringUtil;
 import com.jetbrains.python.psi.*;
 import com.jetbrains.python.psi.icons.PythonPsiApiIcons;
 import com.jetbrains.python.psi.resolve.QualifiedNameFinder;
-import com.jetbrains.python.psi.stubs.*;
+import com.jetbrains.python.psi.stubs.PyAnnotationOwnerStub;
+import com.jetbrains.python.psi.stubs.PyClassStub;
+import com.jetbrains.python.psi.stubs.PyFunctionStub;
+import com.jetbrains.python.psi.stubs.PyTargetExpressionStub;
 import com.jetbrains.python.psi.types.*;
 import com.jetbrains.python.sdk.PythonSdkUtil;
 import org.jetbrains.annotations.NotNull;
@@ -42,6 +45,7 @@ import static com.intellij.openapi.util.text.StringUtil.notNullize;
 import static com.jetbrains.python.ast.PyAstFunction.Modifier.CLASSMETHOD;
 import static com.jetbrains.python.ast.PyAstFunction.Modifier.STATICMETHOD;
 import static com.jetbrains.python.psi.PyUtil.as;
+import static com.jetbrains.python.psi.PyUtil.getGenericTypeForClass;
 import static com.jetbrains.python.psi.impl.PyCallExpressionHelper.interpretAsModifierWrappingCall;
 import static com.jetbrains.python.psi.impl.PyDeprecationUtilKt.extractDeprecationMessageFromDecorator;
 
@@ -130,9 +134,9 @@ public class PyFunctionImpl extends PyBaseElementImpl<PyFunctionStub> implements
   public @Nullable PyClass getContainingClass() {
     final PyFunctionStub stub = getStub();
     if (stub != null) {
-      final StubElement<?> parentStub = PyPsiUtils.getParentStubSkippingVersionChecks(stub);
-      if (parentStub instanceof PyClassStub classStub) {
-        return classStub.getPsi();
+      final StubElement parentStub = stub.getParentStub();
+      if (parentStub instanceof PyClassStub) {
+        return ((PyClassStub)parentStub).getPsi();
       }
 
       return null;
@@ -208,6 +212,13 @@ public class PyFunctionImpl extends PyBaseElementImpl<PyFunctionStub> implements
     if (PyTypeChecker.hasGenerics(type, context)) {
       final var substitutions = PyTypeChecker.unifyGenericCall(receiver, parameters, context);
       if (substitutions != null) {
+        PyClass containingClass = getContainingClass();
+        if (containingClass != null && type instanceof PySelfType) {
+          PyType genericType = getGenericTypeForClass(context, containingClass);
+          if (genericType != null) {
+            type = genericType;
+          }
+        }
         final var substitutionsWithUnresolvedReturnGenerics =
           PyTypeChecker.getSubstitutionsWithUnresolvedReturnGenerics(getParameters(context), type, substitutions, context);
         type = PyTypeChecker.substitute(type, substitutionsWithUnresolvedReturnGenerics, context);

@@ -8,6 +8,8 @@ import com.intellij.ide.UiActivity
 import com.intellij.ide.UiActivity.AsyncBgOperation
 import com.intellij.ide.UiActivityMonitor
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.*
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.application.Application
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
@@ -322,8 +324,11 @@ open class MergingUpdateQueue @JvmOverloads constructor(
 
     waiterForMerge.scheduleTask(
       delay = mergingTimeSpan.toLong(),
-      customModality = (if (!executeInDispatchThread || modalityStateComponent === ANY_COMPONENT) {
+      customModality = (if (!executeInDispatchThread) {
         null
+      }
+      else if (modalityStateComponent === ANY_COMPONENT) {
+        ModalityState.any()
       }
       else {
         getModalityState()

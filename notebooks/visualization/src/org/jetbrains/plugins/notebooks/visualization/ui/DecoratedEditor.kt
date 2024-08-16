@@ -1,6 +1,7 @@
 package org.jetbrains.plugins.notebooks.visualization.ui
 
 import com.intellij.ide.structureView.StructureViewBuilder
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.client.ClientSystemInfo
 import com.intellij.openapi.editor.Caret
@@ -8,7 +9,6 @@ import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.event.*
 import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.util.EditorScrollingPositionKeeper
-import com.intellij.openapi.editor.impl.EditorComponentImpl
 import com.intellij.openapi.fileEditor.FileEditorState
 import com.intellij.openapi.fileEditor.FileEditorStateLevel
 import com.intellij.openapi.fileEditor.TextEditor
@@ -18,7 +18,6 @@ import com.intellij.openapi.vfs.VirtualFile
 import org.jetbrains.plugins.notebooks.ui.editor.actions.command.mode.NotebookEditorMode
 import org.jetbrains.plugins.notebooks.ui.editor.actions.command.mode.setMode
 import org.jetbrains.plugins.notebooks.visualization.*
-import org.jetbrains.plugins.notebooks.visualization.inlay.JupyterBoundsChangeHandler
 import org.jetbrains.plugins.notebooks.visualization.ui.EditorCellViewEventListener.CellViewRemoved
 import org.jetbrains.plugins.notebooks.visualization.ui.EditorCellViewEventListener.EditorCellViewEvent
 import java.awt.*
@@ -44,10 +43,8 @@ private class DecoratedEditor(private val original: TextEditor, private val mana
 
   init {
     if (!GraphicsEnvironment.isHeadless()) {
-      setupScrollPaneListener()
+      setupScrollPane()
     }
-
-    setupEditorComponentWrapper()
 
     manager.addCellViewEventsListener(object : EditorCellViewEventListener {
       override fun onEditorCellViewEvents(events: List<EditorCellViewEvent>) {
@@ -65,7 +62,7 @@ private class DecoratedEditor(private val original: TextEditor, private val mana
 
           val selectedCell = getCellViewByPoint(point)?.cell ?: return
 
-          if (event.area == EditorMouseEventArea.EDITING_AREA && event.inlay == null) {
+          if (event.area == EditorMouseEventArea.EDITING_AREA && event.inlay == null && event.collapsedFoldRegion == null) {
             editor.setMode(NotebookEditorMode.EDIT)
           }
           else {
@@ -99,7 +96,7 @@ private class DecoratedEditor(private val original: TextEditor, private val mana
 
   private fun scheduleSelectionUpdate() {
     if (selectionUpdateScheduled.compareAndSet(false, true)) {
-      SwingUtilities.invokeLater {
+      ApplicationManager.getApplication().invokeLater {
         try {
           updateSelectionByCarets()
         }
@@ -121,9 +118,10 @@ private class DecoratedEditor(private val original: TextEditor, private val mana
     return manager.cells.filter { it.interval.lines.hasIntersectionWith(lines) }
   }
 
-  private fun setupScrollPaneListener() {
+  private fun setupScrollPane() {
     val editorEx = original.editor as EditorEx
     val scrollPane = editorEx.scrollPane
+    editorEx.scrollPane.viewport.isOpaque = false
     scrollPane.viewport.addChangeListener {
       editorEx.contentComponent.mousePosition?.let {
         updateMouseOverCell(it)
@@ -136,14 +134,6 @@ private class DecoratedEditor(private val original: TextEditor, private val mana
 
   override fun getStructureViewBuilder(): StructureViewBuilder? {
     return original.structureViewBuilder
-  }
-
-  private fun setupEditorComponentWrapper() {
-    val editorEx = original.editor as EditorEx
-    val scrollPane = editorEx.scrollPane
-    val view = scrollPane.viewport.view
-    scrollPane.viewport.isOpaque = false
-    scrollPane.viewport.view = EditorComponentWrapper(editorEx, view as EditorComponentImpl)
   }
 
   override fun getComponent(): JComponent = component
@@ -269,31 +259,13 @@ fun decorateTextEditor(textEditor: TextEditor, manager: NotebookCellInlayManager
   return DecoratedEditor(textEditor, manager)
 }
 
-internal fun keepScrollingPositionWhile(editor: Editor, task: Runnable) {
-  ReadAction.run<Nothing> {
+internal fun <T> keepScrollingPositionWhile(editor: Editor, task: () -> T): T {
+  return ReadAction.compute<T, Nothing> {
     EditorScrollingPositionKeeper(editor).use { keeper ->
       keeper.savePosition()
-      task.run()
+      val r = task()
       keeper.restorePosition(false)
-    }
-  }
-}
-
-class EditorComponentWrapper(
-  private val editor: Editor,
-  editorComponent: EditorComponentImpl,
-) : JComponent() {
-  init {
-    isOpaque = false
-    layout = BorderLayout()
-    add(editorComponent, BorderLayout.CENTER)
-  }
-
-  override fun validateTree() {
-    keepScrollingPositionWhile(editor) {
-      JupyterBoundsChangeHandler.get(editor)?.postponeUpdates()
-      super.validateTree()
-      JupyterBoundsChangeHandler.get(editor)?.performPostponed()
+      r
     }
   }
 }

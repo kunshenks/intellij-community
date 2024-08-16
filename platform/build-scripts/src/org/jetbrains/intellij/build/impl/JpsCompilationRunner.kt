@@ -2,15 +2,14 @@
 package org.jetbrains.intellij.build.impl
 
 import com.intellij.devkit.runtimeModuleRepository.jps.build.RuntimeModuleRepositoryBuildConstants
-import com.intellij.platform.diagnostic.telemetry.helpers.use
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithScope
-import com.intellij.platform.diagnostic.telemetry.helpers.useWithoutActiveScope
+import org.jetbrains.intellij.build.telemetry.use
 import io.opentelemetry.api.common.AttributeKey
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api.trace.Span
 import org.jetbrains.intellij.build.CompilationContext
-import org.jetbrains.intellij.build.TraceManager.spanBuilder
+import org.jetbrains.intellij.build.telemetry.TraceManager.spanBuilder
 import org.jetbrains.intellij.build.impl.logging.jps.withJpsLogging
+import org.jetbrains.intellij.build.telemetry.useWithScope
 import org.jetbrains.jps.api.CanceledStatus
 import org.jetbrains.jps.api.CmdlineRemoteProto.Message.ControllerMessage.ParametersMessage.TargetTypeBuildScope
 import org.jetbrains.jps.api.GlobalOptions
@@ -74,7 +73,7 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
     val names = LinkedHashSet<String>()
     spanBuilder("collect dependencies")
       .setAttribute(AttributeKey.longKey("moduleCount"), modules.size.toLong())
-      .useWithoutActiveScope { span ->
+      .use { span ->
         val requiredDependencies = ArrayList<String>()
         for (module in modules) {
           requiredDependencies.clear()
@@ -312,6 +311,7 @@ internal class JpsCompilationRunner(private val context: CompilationContext) {
           .setAttribute("incremental", context.options.incrementalCompilation)
           .setAttribute("cacheDir", compilationData.dataStorageRoot.toString())
           .use {
+            messageHandler.span = it
             Standalone.runBuild(
               { context.projectModel }, compilationData.dataStorageRoot.toFile(),
               mapOf(GlobalOptions.BUILD_DATE_IN_SECONDS to "${context.options.buildDateInSeconds}"),

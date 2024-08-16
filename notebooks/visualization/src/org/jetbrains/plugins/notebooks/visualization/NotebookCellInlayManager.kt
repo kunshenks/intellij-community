@@ -11,26 +11,36 @@ import com.intellij.openapi.editor.colors.EditorColorsListener
 import com.intellij.openapi.editor.colors.EditorColorsManager
 import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
+import com.intellij.openapi.editor.ex.EditorEx
 import com.intellij.openapi.editor.ex.FoldingListener
 import com.intellij.openapi.editor.impl.EditorImpl
 import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.registry.Registry
+import com.intellij.platform.util.coroutines.childScope
 import com.intellij.util.EventDispatcher
 import com.intellij.util.SmartList
 import com.intellij.util.concurrency.ThreadingAssertions
+import kotlinx.coroutines.CoroutineScope
+import org.jetbrains.plugins.notebooks.ui.editor.actions.command.mode.NOTEBOOK_EDITOR_MODE
+import org.jetbrains.plugins.notebooks.ui.editor.actions.command.mode.NotebookEditorMode
+import org.jetbrains.plugins.notebooks.ui.editor.actions.command.mode.NotebookEditorModeListener
 import org.jetbrains.plugins.notebooks.ui.isFoldingEnabledKey
 import org.jetbrains.plugins.notebooks.visualization.inlay.JupyterBoundsChangeHandler
 import org.jetbrains.plugins.notebooks.visualization.ui.*
 import org.jetbrains.plugins.notebooks.visualization.ui.EditorCellEventListener.*
 import org.jetbrains.plugins.notebooks.visualization.ui.EditorCellViewEventListener.CellViewCreated
 import org.jetbrains.plugins.notebooks.visualization.ui.EditorCellViewEventListener.CellViewRemoved
-import java.util.*
 
 class NotebookCellInlayManager private constructor(
   val editor: EditorImpl,
   private val shouldCheckInlayOffsets: Boolean,
-) : Disposable, NotebookIntervalPointerFactory.ChangeListener {
+  private val inputFactories: List<NotebookCellInlayController.InputFactory>,
+  private val cellExtensionFactories: List<CellExtensionFactory>,
+  parentScope: CoroutineScope,
+) : Disposable, NotebookIntervalPointerFactory.ChangeListener, NotebookEditorModeListener {
+  private val coroutineScope = parentScope.childScope("NotebookCellInlayManager")
+
   private val notebookCellLines = NotebookCellLines.get(editor)
 
   private var initialized = false
@@ -54,20 +64,22 @@ class NotebookCellInlayManager private constructor(
 
   private var updateCtx: UpdateContext? = null
 
-  fun update(force: Boolean = false, block: (updateCtx: UpdateContext) -> Unit) {
+  fun <T> update(force: Boolean = false, block: (updateCtx: UpdateContext) -> T): T {
     val ctx = updateCtx
-    if (ctx != null) {
+    return if (ctx != null) {
       block(ctx)
     }
     else {
       val newCtx = UpdateContext(force)
       updateCtx = newCtx
       try {
-        keepScrollingPositionWhile(editor) {
-          block(newCtx)
+        val r = keepScrollingPositionWhile(editor) {
+          val r = block(newCtx)
           newCtx.applyUpdates(editor)
+          r
         }
         inlaysChanged()
+        r
       }
       finally {
         updateCtx = null
@@ -132,7 +144,7 @@ class NotebookCellInlayManager private constructor(
   private fun initialize() {
     // TODO It would be a cool approach to add inlays lazily while scrolling.
 
-    editor.putUserData(key, this)
+    editor.putUserData(CELL_INLAY_MANAGER_KEY, this)
 
     handleRefreshedDocument()
 
@@ -156,6 +168,8 @@ class NotebookCellInlayManager private constructor(
 
     setupFoldingListener()
     setupSelectionUI()
+
+    ApplicationManager.getApplication().messageBus.connect(this).subscribe(NOTEBOOK_EDITOR_MODE, this)
   }
 
   private fun setupSelectionUI() {
@@ -171,6 +185,10 @@ class NotebookCellInlayManager private constructor(
     val selectedCells = selectionModel.selectedCells.map { it.ordinal }
     for (cell in cells) {
       cell.selected = cell.intervalPointer.get()?.ordinal in selectedCells
+
+      if (cell.selected) {
+        editor.project?.messageBus?.syncPublisher(JupyterCellSelectionNotifier.TOPIC)?.cellSelected(cell.interval, editor)
+      }
     }
   }
 
@@ -178,15 +196,17 @@ class NotebookCellInlayManager private constructor(
     val foldingModel = editor.foldingModel
     foldingModel.addListener(object : FoldingListener {
 
-      val changedRegions = LinkedList<FoldRegion>()
-      val removedRegions = LinkedList<FoldRegion>()
+      val changedRegions = LinkedHashSet<FoldRegion>()
+      val removedRegions = LinkedHashSet<FoldRegion>()
 
       override fun beforeFoldRegionDisposed(region: FoldRegion) {
         removedRegions.add(region)
+        changedRegions.remove(region)
       }
 
       override fun beforeFoldRegionRemoved(region: FoldRegion) {
         removedRegions.add(region)
+        changedRegions.remove(region)
       }
 
       override fun onFoldRegionStateChange(region: FoldRegion) {
@@ -198,14 +218,16 @@ class NotebookCellInlayManager private constructor(
         this.changedRegions.clear()
         val removedRegions = removedRegions.toList()
         this.removedRegions.clear()
-        changedRegions.forEach { region ->
-          editorCells(region).forEach {
-            it.visible = region.isExpanded
+        update { ctx ->
+          changedRegions.forEach { region ->
+            editorCells(region).forEach {
+              it.visible = region.isExpanded
+            }
           }
-        }
-        removedRegions.forEach { region ->
-          editorCells(region).forEach {
-            it.visible = true
+          removedRegions.forEach { region ->
+            editorCells(region).forEach {
+              it.visible = true
+            }
           }
         }
       }
@@ -225,11 +247,14 @@ class NotebookCellInlayManager private constructor(
     }
     val pointerFactory = NotebookIntervalPointerFactory.get(editor)
 
-    //Perform inlay init in batch mode
-    editor.inlayModel.execute(true) {
+    update {
       _cells = notebookCellLines.intervals.map { interval ->
         createCell(pointerFactory.create(interval))
       }.toMutableList()
+    }
+    cellEventListeners.multicaster.onEditorCellEvents(_cells.map { CellCreated(it) })
+    _cells.forEach {
+      it.initView()
     }
 
     JupyterBoundsChangeHandler.get(editor)?.postponeUpdates()
@@ -237,41 +262,56 @@ class NotebookCellInlayManager private constructor(
       it.view?.postInitInlays()
     }
 
-    updateCellsFolding(_cells)
-
-    cellEventListeners.multicaster.onEditorCellEvents(_cells.map { CellCreated(it) })
     inlaysChanged()
     JupyterBoundsChangeHandler.get(editor)?.performPostponed()
   }
 
-  private fun createCell(interval: NotebookIntervalPointer) = EditorCell(editor, this, interval) { cell ->
+  private fun createCell(interval: NotebookIntervalPointer) = EditorCell(editor, this, interval, coroutineScope) { cell ->
     EditorCellView(editor, notebookCellLines, cell, this).also { Disposer.register(cell, it) }
-  }.also { Disposer.register(this, it) }
+  }.also {
+    cellExtensionFactories.forEach { factory ->
+      factory.onCellCreated(it)
+    }
+    Disposer.register(this, it)
+  }
 
   private fun inlaysChanged() {
     changedListener?.inlaysChanged()
   }
 
   private fun updateCellsFolding(editorCells: List<EditorCell>) = update { updateContext ->
-    val cellsForFoldingUpdate = editorCells.filter { it.view?.shouldUpdateFolding == true }
-    cellsForFoldingUpdate.forEach { cell ->
+    editorCells.forEach { cell ->
       cell.view?.updateCellFolding(updateContext)
     }
   }
 
   companion object {
-    @JvmStatic
-    fun install(editor: EditorImpl, shouldCheckInlayOffsets: Boolean) {
-      val notebookCellInlayManager = NotebookCellInlayManager(editor, shouldCheckInlayOffsets).also { Disposer.register(editor.disposable, it) }
+    fun install(
+      editor: EditorImpl,
+      shouldCheckInlayOffsets: Boolean,
+      inputFactories: List<NotebookCellInlayController.InputFactory> = listOf(),
+      cellExtensionFactories: List<CellExtensionFactory> = listOf(),
+      parentScope: CoroutineScope,
+    ) {
+      EditorEmbeddedComponentContainer(editor as EditorEx)
+      val notebookCellInlayManager = NotebookCellInlayManager(
+        editor,
+        shouldCheckInlayOffsets,
+        inputFactories,
+        cellExtensionFactories,
+        parentScope
+      ).also { Disposer.register(editor.disposable, it) }
       editor.putUserData(isFoldingEnabledKey, Registry.`is`("jupyter.editor.folding.cells"))
       NotebookIntervalPointerFactory.get(editor).changeListeners.addListener(notebookCellInlayManager, editor.disposable)
       notebookCellInlayManager.initialize()
     }
 
-    @JvmStatic
-    fun get(editor: Editor): NotebookCellInlayManager? = key.get(editor)
+    fun get(editor: Editor): NotebookCellInlayManager? {
+      return CELL_INLAY_MANAGER_KEY.get(editor)
+    }
+
     val FOLDING_MARKER_KEY = Key<Boolean>("jupyter.folding.paragraph")
-    private val key = Key.create<NotebookCellInlayManager>(NotebookCellInlayManager::class.java.name)
+    private val CELL_INLAY_MANAGER_KEY = Key.create<NotebookCellInlayManager>(NotebookCellInlayManager::class.java.name)
   }
 
   override fun onUpdated(event: NotebookIntervalPointersEvent) = update { ctx ->
@@ -311,6 +351,8 @@ class NotebookCellInlayManager private constructor(
     }
     cellEventListeners.multicaster.onEditorCellEvents(events)
 
+    events.filterIsInstance<CellCreated>().forEach { it.cell.initView() }
+
     checkInlayOffsets()
   }
 
@@ -323,8 +365,12 @@ class NotebookCellInlayManager private constructor(
         add(editor.document.getLineEndOffset(cell.interval.lines.last))
       }
     }
-    val wronglyPlacedInlays = editor.inlayModel.getBlockElementsInRange(0, editor.document.textLength)
+
+    val wronglyPlacedInlays = _cells.asSequence()
+      .mapNotNull { it.view }
+      .flatMap { it.getInlays() }
       .filter { it.offset !in inlaysOffsets }
+      .toSet()
     if (wronglyPlacedInlays.isNotEmpty()) {
       thisLogger().error("Expected offsets: $inlaysOffsets. Wrongly placed offsets: ${wronglyPlacedInlays.map { it.offset }} of inlays $wronglyPlacedInlays, for file = '${editor.virtualFile?.name}'")
     }
@@ -381,6 +427,32 @@ class NotebookCellInlayManager private constructor(
       invalidationListeners.forEach { it.run() }
     }
   }
+
+  internal fun getInputFactories(): Sequence<NotebookCellInlayController.InputFactory> {
+    return inputFactories.asSequence()
+  }
+
+  override fun onModeChange(editor: Editor, mode: NotebookEditorMode) {
+    if (editor == this.editor) {
+      when (mode) {
+        NotebookEditorMode.EDIT -> {
+          editor.caretModel.allCarets.forEach { caret ->
+            getCellByLine(editor.document.getLineNumber(caret.offset))?.switchToEditMode()
+          }
+        }
+        NotebookEditorMode.COMMAND -> {
+          _cells.forEach {
+            it.switchToCommandMode()
+          }
+        }
+      }
+    }
+  }
+
+  fun getCellByLine(line: Int): EditorCell? {
+    return _cells.firstOrNull { it.interval.lines.contains(line) }
+  }
+
 }
 
 class UpdateContext(val force: Boolean = false) {
@@ -392,8 +464,10 @@ class UpdateContext(val force: Boolean = false) {
   }
 
   fun applyUpdates(editor: Editor) {
-    editor.foldingModel.runBatchFoldingOperation {
-      foldingOperations.forEach { it() }
+    if (foldingOperations.isNotEmpty()) {
+      editor.foldingModel.runBatchFoldingOperation {
+        foldingOperations.forEach { it() }
+      }
     }
   }
 }

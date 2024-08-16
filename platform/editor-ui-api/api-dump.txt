@@ -151,6 +151,7 @@ com.intellij.ide.projectView.TreeStructureProvider
 - com.intellij.openapi.project.PossiblyDumbAware
 - getData(java.util.Collection,java.lang.String):java.lang.Object
 - a:modify(com.intellij.ide.util.treeView.AbstractTreeNode,java.util.Collection,com.intellij.ide.projectView.ViewSettings):java.util.Collection
+- uiDataSnapshot(com.intellij.openapi.actionSystem.DataSink,java.util.Collection):V
 com.intellij.ide.projectView.ViewSettings
 - com.intellij.ide.util.treeView.NodeOptions
 - sf:DEFAULT:com.intellij.ide.projectView.ViewSettings
@@ -461,6 +462,7 @@ f:com.intellij.ide.ui.UISettings
 - f:getShowNavigationBar():Z
 - f:getShowNavigationBarInBottom():Z
 - f:getShowNewMainToolbar():Z
+- f:getShowPreviewInSearchEverywhere():Z
 - f:getShowStatusBar():Z
 - f:getShowTabsTooltips():Z
 - f:getShowToolWindowsNames():Z
@@ -541,6 +543,7 @@ f:com.intellij.ide.ui.UISettings
 - f:setShowMembersInNavigationBar(Z):V
 - f:setShowNavigationBar(Z):V
 - f:setShowNewMainToolbar(Z):V
+- f:setShowPreviewInSearchEverywhere(Z):V
 - f:setShowStatusBar(Z):V
 - f:setShowTabsTooltips(Z):V
 - f:setShowToolWindowsNames(Z):V
@@ -652,6 +655,7 @@ f:com.intellij.ide.ui.UISettingsState
 - f:getShowNavigationBar():Z
 - f:getShowNewMainToolbar():Z
 - f:getShowPinnedTabsInASeparateRow():Z
+- f:getShowPreviewInSearchEverywhere():Z
 - f:getShowStatusBar():Z
 - f:getShowTabsTooltips():Z
 - f:getShowToolWindowsNames():Z
@@ -738,6 +742,7 @@ f:com.intellij.ide.ui.UISettingsState
 - f:setShowNavigationBar(Z):V
 - f:setShowNewMainToolbar(Z):V
 - f:setShowPinnedTabsInASeparateRow(Z):V
+- f:setShowPreviewInSearchEverywhere(Z):V
 - f:setShowStatusBar(Z):V
 - f:setShowTabsTooltips(Z):V
 - f:setShowToolWindowsNames(Z):V
@@ -1157,7 +1162,6 @@ e:com.intellij.openapi.actionSystem.ActionUpdateThread
 - java.lang.Enum
 - sf:BGT:com.intellij.openapi.actionSystem.ActionUpdateThread
 - sf:EDT:com.intellij.openapi.actionSystem.ActionUpdateThread
-- sf:OLD_EDT:com.intellij.openapi.actionSystem.ActionUpdateThread
 - s:valueOf(java.lang.String):com.intellij.openapi.actionSystem.ActionUpdateThread
 - s:values():com.intellij.openapi.actionSystem.ActionUpdateThread[]
 com.intellij.openapi.actionSystem.ActionUpdateThreadAware
@@ -1193,7 +1197,6 @@ a:com.intellij.openapi.actionSystem.AnAction
 - getSynonyms():java.util.List
 - f:getTemplatePresentation():com.intellij.openapi.actionSystem.Presentation
 - f:getTemplateText():java.lang.String
-- isDefaultIcon():Z
 - isDumbAware():Z
 - f:isEnabledInModalContext():Z
 - isInInjectedContext():Z
@@ -1201,7 +1204,6 @@ a:com.intellij.openapi.actionSystem.AnAction
 - f:registerCustomShortcutSet(com.intellij.openapi.actionSystem.ShortcutSet,javax.swing.JComponent):V
 - f:registerCustomShortcutSet(com.intellij.openapi.actionSystem.ShortcutSet,javax.swing.JComponent,com.intellij.openapi.Disposable):V
 - f:registerCustomShortcutSet(javax.swing.JComponent,com.intellij.openapi.Disposable):V
-- setDefaultIcon(Z):V
 - pf:setEnabledInModalContext(Z):V
 - setInjectedContext(Z):V
 - f:unregisterCustomShortcutSet(javax.swing.JComponent):V
@@ -1436,6 +1438,8 @@ com.intellij.openapi.actionSystem.ex.InlineActionsHolder
 - getInlineActions():java.util.List
 com.intellij.openapi.actionSystem.ex.MainMenuPresentationAware
 - a:alwaysShowIconInMainMenu():Z
+com.intellij.openapi.actionSystem.remoting.ActionWithMergeId
+- getMergeId():java.lang.String
 com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 - sf:AUTOLAYOUT_STRATEGY:com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy
 - sf:COMPRESSING_STRATEGY:com.intellij.openapi.actionSystem.toolbarLayout.ToolbarLayoutStrategy

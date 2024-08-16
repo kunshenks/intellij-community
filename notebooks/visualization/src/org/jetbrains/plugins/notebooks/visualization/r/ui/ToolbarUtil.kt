@@ -7,7 +7,6 @@ package org.jetbrains.plugins.notebooks.visualization.r.ui
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.actionSystem.ex.ActionUtil
-import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.util.NlsActions
 import com.intellij.openapi.util.NlsSafe
@@ -82,7 +81,7 @@ object ToolbarUtil {
       addAll(actions)
       isPopup = true
       with(templatePresentation) {
-        putClientProperty(ActionButton.HIDE_DROPDOWN_ICON, true)
+        putClientProperty(ActionUtil.HIDE_DROPDOWN_ICON, true)
         icon = AllIcons.Actions.More
       }
     }
@@ -131,6 +130,11 @@ object ToolbarUtil {
       ActionUtil.copyFrom(this, holder.id)
       fallbackDescription = templatePresentation.description
       fallbackIcon = templatePresentation.icon
+
+      if (templateText.isNullOrBlank()) {
+        // Note: not a typo. Effectively this means "use description instead of text if the latest is null"
+        templatePresentation.putClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR, true)
+      }
     }
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
@@ -148,11 +152,6 @@ object ToolbarUtil {
         e.presentation.icon = createIcon(isEnabled)
         e.presentation.description = createDescription(isEnabled)
       }
-    }
-
-    override fun displayTextInToolbar(): Boolean {
-      // Note: not a typo. Effectively this means "use description instead of text if the latest is null"
-      return templateText.isNullOrBlank()
     }
 
     private fun createIcon(isEnabled: Boolean): Icon? {

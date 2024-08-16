@@ -4,6 +4,8 @@ package com.intellij.openapi.editor.impl.zombie
 import com.intellij.ide.plugins.PluginManagerCore
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.WriteIntentReadAction
+import com.intellij.openapi.application.ex.ApplicationManagerEx
 import com.intellij.openapi.application.readActionBlocking
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -104,7 +106,10 @@ class Necropolis(private val project: Project, private val coroutineScope: Corou
         override fun editorReleased(event: EditorFactoryEvent) {
           val recipe = createTurningRecipe(event)
           if (recipe != null) {
-            turnIntoZombiesAndBury(necromancers, recipe)
+            //maybe readaction
+            WriteIntentReadAction.run {
+              turnIntoZombiesAndBury(necromancers, recipe)
+            }
           }
         }
       },
@@ -142,10 +147,14 @@ class Necropolis(private val project: Project, private val coroutineScope: Corou
         if (documentContent != null) {
           val fingerprint = FingerprintedZombieImpl.captureFingerprint(documentContent)
           for ((necromancer, zombie) in zombies) {
-            launch(CoroutineName(necromancer.name())) {
-              val fingerprinted = FingerprintedZombieImpl(fingerprint, zombie)
-              if (recipe.isValid() && necromancer.shouldBuryZombie(recipe, fingerprinted)) {
-                necromancer.buryZombie(recipe.fileId, fingerprinted)
+            val context = if (ApplicationManagerEx.isInIntegrationTest()){
+              CoroutineName(necromancer.name()) + NonCancellable
+            } else {
+              CoroutineName(necromancer.name())
+            }
+            launch(context) {
+              if (recipe.isValid() && necromancer.shouldBuryZombie(recipe, zombie)) {
+                necromancer.buryZombie(recipe.fileId, FingerprintedZombieImpl(fingerprint, zombie))
               }
             }
           }

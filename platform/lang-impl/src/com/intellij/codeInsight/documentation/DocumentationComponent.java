@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.documentation;
 
 import com.intellij.codeInsight.CodeInsightBundle;
@@ -62,7 +62,6 @@ import com.intellij.util.ui.JBDimension;
 import com.intellij.util.ui.UIUtil;
 import com.intellij.util.ui.accessibility.ScreenReader;
 import org.jetbrains.annotations.Nls;
-import org.jetbrains.annotations.NonNls;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -80,12 +79,8 @@ import java.util.List;
  * @deprecated Unused in v2 implementation. Unsupported: use at own risk.
  */
 @Deprecated(forRemoval = true)
-public class DocumentationComponent extends JPanel implements Disposable, DataProvider, WidthBasedLayout {
+public class DocumentationComponent extends JPanel implements Disposable, UiCompatibleDataProvider, WidthBasedLayout {
   private static final Logger LOG = Logger.getInstance(DocumentationComponent.class);
-  static final DataProvider HELP_DATA_PROVIDER =
-    dataId -> PlatformCoreDataKeys.HELP_ID.is(dataId)
-              ? "reference.toolWindows.Documentation"
-              : null;
 
   public static final ColorKey COLOR_KEY = EditorColors.DOCUMENTATION_COLOR;
   public static final Color SECTION_COLOR = Gray.get(0x90);
@@ -295,9 +290,6 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
     else if (myManager.myToolWindow != null) {
       Disposer.register(myManager.myToolWindow.getContentManager(), this);
     }
-    DataManager.registerDataProvider(myEditorPane, HELP_DATA_PROVIDER);
-    DataManager.registerDataProvider(myScrollPane, HELP_DATA_PROVIDER);
-
     updateControlState();
   }
 
@@ -356,19 +348,16 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
   }
 
   @Override
-  public Object getData(@NotNull @NonNls String dataId) {
-    if (DocumentationManager.SELECTED_QUICK_DOC_TEXT.is(dataId)) {
-      // Javadocs often contain &nbsp; symbols (non-breakable white space). We don't want to copy them as is and replace
-      // with raw white spaces. See IDEA-86633 for more details.
-      String selectedText = myEditorPane.getSelectedText();
-      return selectedText == null ? null : selectedText.replace((char)160, ' ');
-    }
-
-    return null;
+  public void uiDataSnapshot(@NotNull DataSink sink) {
+    sink.set(PlatformCoreDataKeys.HELP_ID, "reference.toolWindows.Documentation");
+    // Javadocs often contain &nbsp; symbols (non-breakable white space). We don't want to copy them as is and replace
+    // with raw white spaces. See IDEA-86633 for more details.
+    String selectedText = myEditorPane.getSelectedText();
+    sink.set(DocumentationManager.SELECTED_QUICK_DOC_TEXT,
+             selectedText == null ? null : selectedText.replace((char)160, ' '));
   }
 
-  @NotNull
-  public static FontSize getQuickDocFontSize() {
+  public static @NotNull FontSize getQuickDocFontSize() {
     return DocumentationFontSize.getDocumentationFontSize();
   }
 
@@ -404,8 +393,7 @@ public class DocumentationComponent extends JPanel implements Disposable, DataPr
     return myEditorPane;
   }
 
-  @Nullable
-  public PsiElement getElement() {
+  public @Nullable PsiElement getElement() {
     return myElement != null ? myElement.getElement() : null;
   }
 

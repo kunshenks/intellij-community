@@ -146,6 +146,10 @@ class FirUastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkReceiverTypeOfExtensionFunction(myFixture)
     }
 
+    fun testSourcePsiOfLazyPropertyAccessor() {
+        checkSourcePsiOfLazyPropertyAccessor(myFixture)
+    }
+
     fun testTextRangeOfLocalVariable() {
         checkTextRangeOfLocalVariable(myFixture)
     }
@@ -154,11 +158,23 @@ class FirUastApiFixtureTest : KotlinLightCodeInsightFixtureTestCase(), UastApiFi
         checkNameReferenceVisitInConstructorCall(myFixture)
     }
 
+    fun testNoArgConstructorSourcePsi() {
+        checkNoArgConstructorSourcePsi(myFixture)
+    }
+
     fun testNullLiteral() {
         checkNullLiteral(myFixture)
     }
 
     fun testStringConcatInAnnotationValue() {
         checkStringConcatInAnnotationValue(myFixture)
+    }
+
+    fun testLocalPropertyInitializerEvaluate_String() {
+        checkLocalPropertyInitializerEvaluation_String(myFixture)
+    }
+
+    fun testLocalPropertyInitializerEvaluate_Numeric() {
+        checkLocalPropertyInitializerEvaluation_Numeric(myFixture)
     }
 }

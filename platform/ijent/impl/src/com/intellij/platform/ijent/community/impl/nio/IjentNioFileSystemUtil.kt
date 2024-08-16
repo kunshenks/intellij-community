@@ -7,33 +7,10 @@ import com.intellij.platform.ijent.fs.*
 import com.intellij.util.text.nullize
 import kotlinx.coroutines.Dispatchers
 import java.io.IOException
-import java.nio.channels.NonWritableChannelException
 import java.nio.file.*
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.startCoroutine
-
-/**
- * Returns an adapter from [IjentFileSystemApi] to [java.nio.file.FileSystem]. The adapter is automatically registered in advance,
- * also it is automatically closed when it is needed.
- *
- * The function is idempotent and thread-safe.
- */
-fun IjentFileSystemApi.asNioFileSystem(): FileSystem {
-  val nioFsProvider = IjentNioFileSystemProvider.getInstance()
-  val uri = id.uri
-  return try {
-    nioFsProvider.getFileSystem(uri)
-  }
-  catch (ignored: FileSystemNotFoundException) {
-    try {
-      nioFsProvider.newFileSystem(uri, mutableMapOf<String, Any>())
-    }
-    catch (ignored: FileSystemAlreadyExistsException) {
-      nioFsProvider.getFileSystem(uri)
-    }
-  }
-}
 
 @Throws(FileSystemException::class)
 internal fun <T, E : IjentFsError> IjentFsResult<T, E>.getOrThrowFileSystemException(): T =
@@ -42,6 +19,7 @@ internal fun <T, E : IjentFsError> IjentFsResult<T, E>.getOrThrowFileSystemExcep
     is IjentFsResult.Error -> error.throwFileSystemException()
   }
 
+// TODO There's java.nio.file.FileSystemLoopException, so ELOOP should be added to all error codes for a decent support of all exceptions.
 @Throws(FileSystemException::class)
 internal fun IjentFsError.throwFileSystemException(): Nothing {
   throw when (this) {
@@ -49,17 +27,19 @@ internal fun IjentFsError.throwFileSystemException(): Nothing {
     is IjentFsError.NotFile -> FileSystemException(where.toString(), null, "Is a directory")
     is IjentFsError.PermissionDenied -> AccessDeniedException(where.toString(), null, message.nullize())
     is IjentFsError.NotDirectory -> NotDirectoryException(where.toString())
-    is IjentFsError.AlreadyDeleted -> NoSuchFileException(where.toString())
     is IjentFsError.AlreadyExists -> FileAlreadyExistsException(where.toString())
     is IjentFsError.UnknownFile -> IOException("File is not opened")
-    is IjentOpenedFile.SeekError.InvalidValue -> throw IllegalArgumentException(message)
-    is IjentFsError.Other -> FileSystemException(where.toString(), null, message.nullize())
-    is IjentOpenedFile.Reader.ReadError.InvalidValue -> throw IllegalArgumentException(message)
-    is IjentFileSystemApi.DeleteException.DirNotEmpty -> DirectoryNotEmptyException(where.toString())
+    is IjentFsError.DirNotEmpty -> DirectoryNotEmptyException(where.toString())
+    is IjentFsError.NameTooLong -> IllegalArgumentException("Name is too long")
+    is IjentFsError.NotEnoughSpace -> FileSystemException(where.toString(), null, "Not enough space")
+    is IjentFsError.ReadOnlyFileSystem -> ReadOnlyFileSystemException()
+    is IjentOpenedFile.SeekError.InvalidValue -> IllegalArgumentException(message)
+    is IjentOpenedFile.Reader.ReadError.InvalidValue -> IllegalArgumentException(message)
     is IjentOpenedFile.Writer.TruncateException.NegativeOffset,
     is IjentOpenedFile.Writer.TruncateException.OffsetTooBig -> throw IllegalArgumentException(message)
-    is IjentOpenedFile.Writer.TruncateException.ReadOnlyFs -> throw NonWritableChannelException()
     is IjentOpenedFile.Writer.WriteError.InvalidValue -> throw IllegalArgumentException(message)
+    is IjentFileSystemApi.DeleteException.UnresolvedLink -> throw FileSystemException(where.toString(), null, message)
+    is IjentFsError.Other -> FileSystemException(where.toString(), null, message.nullize())
   }
 }
 

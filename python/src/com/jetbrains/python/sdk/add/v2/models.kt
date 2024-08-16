@@ -9,7 +9,6 @@ import com.intellij.openapi.application.asContextElement
 import com.intellij.openapi.diagnostic.getOrLogException
 import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.observable.properties.ObservableMutableProperty
-import com.intellij.openapi.observable.properties.ObservableProperty
 import com.intellij.openapi.observable.properties.PropertyGraph
 import com.intellij.openapi.projectRoots.Sdk
 import com.intellij.openapi.util.io.FileUtil
@@ -17,33 +16,33 @@ import com.jetbrains.python.configuration.PyConfigurableInterpreterList
 import com.jetbrains.python.newProject.steps.ProjectSpecificSettingsStep
 import com.jetbrains.python.psi.LanguageLevel
 import com.jetbrains.python.sdk.*
-import com.jetbrains.python.sdk.add.ProjectLocationContexts
 import com.jetbrains.python.sdk.add.target.conda.suggestCondaPath
-import com.jetbrains.python.sdk.add.v2.PythonAddInterpreterPresenter.ProjectPathWithContext
+import com.jetbrains.python.sdk.flavors.PythonSdkFlavor
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnv
 import com.jetbrains.python.sdk.flavors.conda.PyCondaEnvIdentity
-import com.jetbrains.python.sdk.interpreters.detectSystemInterpreters
 import com.jetbrains.python.sdk.pipenv.pipEnvPath
 import com.jetbrains.python.sdk.poetry.poetryPath
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import java.nio.file.Path
-import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.pathString
 
 
 @OptIn(ExperimentalCoroutinesApi::class)
-abstract class PythonAddInterpreterModel(val scope: CoroutineScope, val uiContext: CoroutineContext, projectPathProperty: ObservableProperty<String>? = null) {
+abstract class PythonAddInterpreterModel(params: PyInterpreterModelParams) {
 
   val propertyGraph = PropertyGraph()
   val navigator = PythonNewEnvironmentDialogNavigator()
   open val state = AddInterpreterState(propertyGraph)
   open val targetEnvironmentConfiguration: TargetEnvironmentConfiguration? = null
 
-  val projectPath = projectPathProperty ?: propertyGraph.property("") // todo how to populate?
+  val projectPath = params.projectPathProperty ?: propertyGraph.property("") // todo how to populate?
+  internal val scope = params.scope
+  internal val uiContext = params.uiContext
 
   internal val knownInterpreters: MutableStateFlow<List<PythonSelectableInterpreter>> = MutableStateFlow(emptyList())
-  internal val detectedInterpreters: MutableStateFlow<List<PythonSelectableInterpreter>> = MutableStateFlow(emptyList())
+  private val _detectedInterpreters: MutableStateFlow<List<PythonSelectableInterpreter>> = MutableStateFlow(emptyList())
+  val detectedInterpreters: StateFlow<List<PythonSelectableInterpreter>> = _detectedInterpreters
   val manuallyAddedInterpreters: MutableStateFlow<List<PythonSelectableInterpreter>> = MutableStateFlow(emptyList())
   private var installable: List<PythonSelectableInterpreter> = emptyList()
   val condaEnvironments: MutableStateFlow<List<PyCondaEnv>> = MutableStateFlow(emptyList())
@@ -124,17 +123,17 @@ abstract class PythonAddInterpreterModel(val scope: CoroutineScope, val uiContex
         .sortedByDescending { it.first }
         .map { InstallableSelectableInterpreter(it.second) }
 
-      val detected = runCatching {
-        detectSystemInterpreters(projectDir = null, null, targetEnvironmentConfiguration, existingSdks)
-        // todo check fix about appending recently used
-        //return@runCatching appendMostRecentlyUsedBaseSdk(detected, context.targetEnvironmentConfiguration)
-        //detected.filter { it.homePath !in savedPaths }
-      }.getOrLogException(PythonAddInterpreterPresenter.LOG) ?: emptyList()
+
+      val existingSdkPaths = existingSdks.mapNotNull { it.homePath }.mapNotNull { tryResolvePath(it) }.toSet()
+
+      val detected = PythonSdkFlavor.getApplicableFlavors(true).flatMap { it.suggestLocalHomePaths(null, null) }
+        .filterNot { it in existingSdkPaths }
+        .map { DetectedSelectableInterpreter(it.pathString) }
 
       withContext(uiContext) {
         installable = filteredInstallable
         knownInterpreters.value = allValidSdks // todo check target?
-        detectedInterpreters.value = detected
+        _detectedInterpreters.value = detected
       }
 
     }
@@ -146,8 +145,8 @@ abstract class PythonAddInterpreterModel(val scope: CoroutineScope, val uiContex
 }
 
 
-abstract class PythonMutableTargetAddInterpreterModel(scope: CoroutineScope, uiContext: CoroutineContext, projectPathProperty: ObservableProperty<String>? = null)
-  : PythonAddInterpreterModel(scope, uiContext, projectPathProperty) {
+abstract class PythonMutableTargetAddInterpreterModel(params: PyInterpreterModelParams)
+  : PythonAddInterpreterModel(params) {
   override val state: MutableTargetState = MutableTargetState(propertyGraph)
 
   override suspend fun initialize() {
@@ -192,8 +191,8 @@ abstract class PythonMutableTargetAddInterpreterModel(scope: CoroutineScope, uiC
 }
 
 
-open class PythonLocalAddInterpreterModel(scope: CoroutineScope, uiContext: CoroutineContext, projectPathProperty: ObservableProperty<String>? = null)
-  : PythonMutableTargetAddInterpreterModel(scope, uiContext, projectPathProperty) {
+class PythonLocalAddInterpreterModel(params: PyInterpreterModelParams)
+  : PythonMutableTargetAddInterpreterModel(params) {
 
   override suspend fun initialize() {
     super.initialize()
@@ -231,32 +230,12 @@ open class PythonLocalAddInterpreterModel(scope: CoroutineScope, uiContext: Coro
   }
 }
 
-class PythonWslCapableLocalAddInterpreterModel(scope: CoroutineScope, uiContext: CoroutineContext) : PythonMutableTargetAddInterpreterModel(scope, uiContext) {
-
-  private val projectLocationContexts = ProjectLocationContexts()
-  private val _projectWithContextFlow: MutableStateFlow<ProjectPathWithContext> =
-    MutableStateFlow(projectPath.get().associateWithContext())
-
-  init {
-    projectPath.afterChange { projectPath ->
-      val context = projectLocationContexts.getProjectLocationContextFor(projectPath)
-      _projectWithContextFlow.value = ProjectPathWithContext(projectPath, context)
-    }
-  }
-
-  private fun String.associateWithContext(): ProjectPathWithContext =
-    ProjectPathWithContext(projectPath = this, projectLocationContexts.getProjectLocationContextFor(projectPath = this))
-}
-
-class PythonSshAddInterpreterModel(scope: CoroutineScope, uiContext: CoroutineContext) : PythonMutableTargetAddInterpreterModel(scope, uiContext)
-
-class PythonDockerAddInterpreterModel(scope: CoroutineScope, uiContext: CoroutineContext) : PythonAddInterpreterModel(scope, uiContext)
-
-
 
 // todo does it need target configuration
 abstract class PythonSelectableInterpreter {
   abstract val homePath: String
+  override fun toString(): String =
+    "PythonSelectableInterpreter(homePath='$homePath')"
 }
 
 class ExistingSelectableInterpreter(val sdk: Sdk, val languageLevel: LanguageLevel, val isSystemWide: Boolean) : PythonSelectableInterpreter() {
@@ -264,7 +243,7 @@ class ExistingSelectableInterpreter(val sdk: Sdk, val languageLevel: LanguageLev
 }
 
 
-class DetectedSelectableInterpreter(override val homePath: String, targetConfiguration: TargetEnvironmentConfiguration? = null) : PythonSelectableInterpreter()
+class DetectedSelectableInterpreter(override val homePath: String) : PythonSelectableInterpreter()
 
 class ManuallyAddedSelectableInterpreter(override val homePath: String) : PythonSelectableInterpreter()
 class InstallableSelectableInterpreter(val sdk: PySdkToInstall) : PythonSelectableInterpreter() {
@@ -272,15 +251,9 @@ class InstallableSelectableInterpreter(val sdk: PySdkToInstall) : PythonSelectab
 }
 
 
-
-
 class InterpreterSeparator(val text: String) : PythonSelectableInterpreter() {
   override val homePath: String = ""
 }
-
-
-
-
 
 
 open class AddInterpreterState(propertyGraph: PropertyGraph) {
@@ -301,7 +274,6 @@ class MutableTargetState(propertyGraph: PropertyGraph) : AddInterpreterState(pro
 }
 
 
-
 val PythonAddInterpreterModel.existingSdks
   get() = allInterpreters.value.filterIsInstance<ExistingSelectableInterpreter>().map { it.sdk }
 
@@ -309,5 +281,5 @@ val PythonAddInterpreterModel.baseSdks
   get() = baseInterpreters.value.filterIsInstance<ExistingSelectableInterpreter>().map { it.sdk }
 
 fun PythonAddInterpreterModel.findInterpreter(path: String): PythonSelectableInterpreter? {
-  return allInterpreters.value.asSequence().find { it.homePath == path}
+  return allInterpreters.value.asSequence().find { it.homePath == path }
 }

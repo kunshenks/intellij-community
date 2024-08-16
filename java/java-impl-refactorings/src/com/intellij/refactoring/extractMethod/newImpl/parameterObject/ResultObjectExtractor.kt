@@ -4,11 +4,8 @@ package com.intellij.refactoring.extractMethod.newImpl.parameterObject
 import com.intellij.codeInsight.hint.EditorCodePreview
 import com.intellij.codeInsight.hint.HintManager
 import com.intellij.java.refactoring.JavaRefactoringBundle
-import com.intellij.openapi.application.EDT
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.application.readAction
-import com.intellij.openapi.command.impl.FinishMarkAction
-import com.intellij.openapi.command.impl.StartMarkAction
 import com.intellij.openapi.command.writeCommandAction
 import com.intellij.openapi.diff.DiffColors
 import com.intellij.openapi.editor.Editor
@@ -18,15 +15,14 @@ import com.intellij.psi.*
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.util.PsiUtil
 import com.intellij.refactoring.extractMethod.ExtractMethodHandler
-import com.intellij.refactoring.extractMethod.newImpl.ExtractException
+import com.intellij.refactoring.extractMethod.newImpl.ExtractMethodHelper
 import com.intellij.refactoring.extractMethod.newImpl.MethodExtractor
 import com.intellij.refactoring.extractMethod.newImpl.inplace.EditorState
 import com.intellij.refactoring.extractMethod.newImpl.inplace.ExtractMethodTemplateBuilder
 import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractUtils
 import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractUtils.createGreedyRangeMarker
+import com.intellij.refactoring.extractMethod.newImpl.inplace.InplaceExtractUtils.showExtractErrorHint
 import com.intellij.refactoring.extractMethod.newImpl.inplace.TemplateField
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 private data class IntroduceObjectResult(
   val introducedClass: PsiClass,
@@ -45,9 +41,8 @@ internal object ResultObjectExtractor {
 
     val affectedReferences = readAction { ParameterObjectUtils.findAffectedReferences(variables, scope) }
     if (affectedReferences == null) {
-      withContext(Dispatchers.EDT) {
-        InplaceExtractUtils.showExtractErrorHint(editor, ExtractException(JavaRefactoringBundle.message("extract.method.error.many.outputs"), variables))
-      }
+
+      showExtractErrorHint(editor, JavaRefactoringBundle.message("extract.method.error.many.outputs"), variables.map { it.textRange })
       return
     }
     val shouldInsertRecord = readAction { PsiUtil.isAvailable(JavaFeature.RECORDS, variables.first()) }
@@ -63,9 +58,8 @@ internal object ResultObjectExtractor {
     }
     val editorState = readAction { EditorState(project, editor) }
     val disposable = Disposer.newDisposable()
+    ExtractMethodHelper.mergeWriteCommands(editor, disposable, ExtractMethodHandler.getRefactoringName())
     writeCommandAction(project, ExtractMethodHandler.getRefactoringName()) {
-      val startMarkAction = StartMarkAction.start(editor, project, ExtractMethodHandler.getRefactoringName())
-      Disposer.register(disposable) { FinishMarkAction.finish(project, editor, startMarkAction) }
       try {
         val (introducedClass, declaration, replacements) = introduceObjectForVariables(objectBuilder, variables, affectedReferences, scope.last())
         val introducedVariableReferences = replacements.map { replacement ->

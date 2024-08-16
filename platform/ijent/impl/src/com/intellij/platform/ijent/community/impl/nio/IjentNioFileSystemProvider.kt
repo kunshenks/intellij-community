@@ -2,15 +2,16 @@
 package com.intellij.platform.ijent.community.impl.nio
 
 import com.intellij.openapi.diagnostic.thisLogger
-import com.intellij.platform.ijent.IjentId
-import com.intellij.platform.ijent.IjentSessionRegistry
 import com.intellij.platform.ijent.community.impl.IjentFsResultImpl
+import com.intellij.platform.ijent.community.impl.nio.IjentNioFileSystemProvider.Companion.newFileSystemMap
 import com.intellij.platform.ijent.community.impl.nio.IjentNioFileSystemProvider.UnixFilePermissionBranch.*
 import com.intellij.platform.ijent.fs.*
 import com.intellij.platform.ijent.fs.IjentFileInfo.Type.*
 import com.intellij.platform.ijent.fs.IjentFileSystemPosixApi.CreateDirectoryException
+import com.intellij.platform.ijent.fs.IjentFileSystemPosixApi.CreateSymbolicLinkException
 import com.intellij.platform.ijent.fs.IjentPosixFileInfo.Type.Symlink
-import kotlinx.coroutines.job
+import com.intellij.util.text.nullize
+import com.sun.nio.file.ExtendedCopyOption
 import java.io.IOException
 import java.net.URI
 import java.nio.channels.AsynchronousFileChannel
@@ -22,11 +23,20 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.attribute.FileAttribute
 import java.nio.file.attribute.FileAttributeView
 import java.nio.file.spi.FileSystemProvider
-import java.util.concurrent.ConcurrentHashMap
+import java.nio.file.spi.FileSystemProvider.installedProviders
 import java.util.concurrent.ExecutorService
 import kotlin.contracts.ExperimentalContracts
 import kotlin.contracts.contract
 
+/**
+ * This filesystem connects to particular IJent instances.
+ *
+ * A new filesystem can be created with [newFileSystem] and [newFileSystemMap].
+ * The URL must have the scheme "ijent", and the unique identifier of a filesystem
+ * is represented with an authority and a path.
+ *
+ * For accessing WSL use [com.intellij.execution.wsl.ijent.nio.IjentWslNioFileSystemProvider].
+ */
 class IjentNioFileSystemProvider : FileSystemProvider() {
   companion object {
     @JvmStatic
@@ -34,56 +44,91 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
       installedProviders()
         .filterIsInstance<IjentNioFileSystemProvider>()
         .single()
+
+    @JvmStatic
+    fun newFileSystemMap(ijentFs: IjentFileSystemApi): MutableMap<String, *> =
+      mutableMapOf(KEY_IJENT_FS to ijentFs)
+
+    private const val SCHEME = "ijent"
+    private const val KEY_IJENT_FS = "ijentFs"
   }
 
-  private val registeredFileSystems = ConcurrentHashMap<IjentId, IjentNioFileSystem>()
+  @JvmInline
+  internal value class CriticalSection<D : Any>(val hidden: D) {
+    inline operator fun <T> invoke(body: D.() -> T): T =
+      synchronized(hidden) {
+        hidden.body()
+      }
+  }
 
-  override fun getScheme(): String = "ijent"
+  private val criticalSection = CriticalSection(object {
+    val authorityRegistry: MutableMap<URI, IjentFileSystemApi> = hashMapOf()
+  })
 
-  override fun newFileSystem(uri: URI, env: MutableMap<String, *>?): IjentNioFileSystem {
+  override fun getScheme(): String = SCHEME
+
+  override fun newFileSystem(uri: URI, env: MutableMap<String, *>): IjentNioFileSystem {
+    @Suppress("NAME_SHADOWING") val uri = uri.normalize()
     typicalUriChecks(uri)
-
-    if (!uri.path.isNullOrEmpty()) {
-      TODO("Filesystems with non-empty paths are not supported yet.")
+    val ijentFs =
+      try {
+        env[KEY_IJENT_FS] as IjentFileSystemApi
+      }
+      catch (err: Exception) {
+        throw when (err) {
+          is NullPointerException, is ClassCastException ->
+            IllegalArgumentException("Invalid map. `IjentNioFileSystemProvider.newFileSystemMap` should be used for map creation.")
+          else ->
+            err
+        }
+      }
+    val uriParts = getUriParts(uri)
+    criticalSection {
+      for (uriPart in uriParts) {
+        if (uriPart in authorityRegistry) {
+          throw FileSystemAlreadyExistsException(
+            "`$uri` can't be registered because there's an already registered as IJent FS provider `$uriPart`"
+          )
+        }
+      }
+      authorityRegistry[uri] = ijentFs
     }
-
-    val ijentId = IjentId(uri.host)
-
-    val ijentApi = IjentSessionRegistry.instance().ijents[ijentId]
-    require(ijentApi != null) {
-      "$ijentApi is not registered in ${IjentSessionRegistry::class.java.simpleName}"
-    }
-
-    val fs = IjentNioFileSystem(this, ijentApi.fs, onClose = { registeredFileSystems.remove(ijentId) })
-
-    if (registeredFileSystems.putIfAbsent(ijentId, fs) != null) {
-      throw FileSystemAlreadyExistsException("A filesystem for $ijentId is already registered")
-    }
-
-    fs.ijentFs.coroutineScope.coroutineContext.job.invokeOnCompletion {
-      registeredFileSystems.remove(ijentId)
-    }
-
-    return fs
+    return IjentNioFileSystem(this, uri)
   }
 
-  override fun newFileSystem(path: Path, env: MutableMap<String, *>?): IjentNioFileSystem =
+  private fun getUriParts(uri: URI): Collection<URI> = uri.path.asSequence()
+    .mapIndexedNotNull { index, c -> if (c == '/') index else null }
+    .map { URI(uri.scheme, uri.authority, uri.path.substring(0, it), null, null) }
+    .plus(sequenceOf(uri))
+    .toList()
+    .asReversed()
+
+  override fun newFileSystem(path: Path, env: MutableMap<String, *>): IjentNioFileSystem =
     newFileSystem(path.toUri(), env)
 
   override fun getFileSystem(uri: URI): IjentNioFileSystem {
-    typicalUriChecks(uri)
-    return registeredFileSystems[IjentId(uri.host)] ?: throw FileSystemNotFoundException()
+    val uriParts = getUriParts(uri.normalize())
+    val matchingUri = criticalSection {
+      uriParts.firstOrNull { it in authorityRegistry }
+    }
+    if (matchingUri != null) {
+      return IjentNioFileSystem(this, matchingUri)
+    }
+    else {
+      throw FileSystemNotFoundException("`$uri` is not registered as IJent FS provider")
+    }
   }
 
-  override fun getPath(uri: URI): IjentNioPath =
-    getFileSystem(uri).run {
-      getPath(
-        when (ijentFs) {
-          is IjentFileSystemPosixApi -> uri.path
-          is IjentFileSystemWindowsApi -> uri.path.trimStart('/')
-        }
-      )
-    }
+  override fun getPath(uri: URI): IjentNioPath {
+    val nioFs = getFileSystem(uri)
+    val relativeUri = nioFs.uri.relativize(uri)
+    return nioFs.getPath(
+      when (nioFs.ijentFs) {
+        is IjentFileSystemPosixApi -> relativeUri.path.nullize() ?: "/"
+        is IjentFileSystemWindowsApi -> relativeUri.path.trimStart('/')  // TODO Check that uri.path contains the drive letter.
+      }
+    )
+  }
 
   override fun newByteChannel(path: Path, options: Set<OpenOption>, vararg attrs: FileAttribute<*>): SeekableByteChannel =
     newFileChannel(path, options, *attrs)
@@ -92,7 +137,7 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
     ensureIjentNioPath(path)
     require(path.ijentPath is IjentPath.Absolute)
     // TODO Handle options and attrs
-    val fs = registeredFileSystems[path.ijentId] ?: throw FileSystemNotFoundException()
+    val fs = path.nioFs
 
     require(!(READ in options && APPEND in options)) { "READ + APPEND not allowed" }
     require(!(APPEND in options && TRUNCATE_EXISTING in options)) { "APPEND + TRUNCATE_EXISTING not allowed" }
@@ -101,16 +146,14 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
       if (DELETE_ON_CLOSE in options) TODO("WRITE + CREATE_NEW")
       if (LinkOption.NOFOLLOW_LINKS in options) TODO("WRITE + NOFOLLOW_LINKS")
 
-      val writeOptions = fs.ijentFs
-        .writeOptionsBuilder(path.ijentPath)
+      val writeOptions = IjentFileSystemApi.writeOptionsBuilder(path.ijentPath)
         .append(APPEND in options)
         .truncateExisting(TRUNCATE_EXISTING in options)
         .creationMode(when {
                         CREATE_NEW in options -> IjentFileSystemApi.FileWriterCreationMode.ONLY_CREATE
                         CREATE in options -> IjentFileSystemApi.FileWriterCreationMode.ALLOW_CREATE
                         else -> IjentFileSystemApi.FileWriterCreationMode.ONLY_OPEN_EXISTING
-                      }).build()
-
+                      })
 
       fsBlocking {
         if (READ in options) {
@@ -188,14 +231,15 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
 
   override fun delete(path: Path) {
     ensureIjentNioPath(path)
+    if (path.ijentPath !is IjentPath.Absolute) {
+      throw FileSystemException(path.toString(), null, "Path is not absolute")
+    }
     fsBlocking {
       try {
-        path.nioFs.ijentFs.deleteDirectory(path.ijentPath as IjentPath.Absolute, false)
+        path.nioFs.ijentFs.delete(path.ijentPath as IjentPath.Absolute,false, false)
       }
-      catch (e: IjentFileSystemApi.DeleteException.DirNotEmpty) {
-        val exception = DirectoryNotEmptyException(path.toString())
-        exception.addSuppressed(e)
-        throw exception
+      catch (e: IjentFileSystemApi.DeleteException) {
+        e.throwFileSystemException()
       }
     }
   }
@@ -210,25 +254,51 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
     val targetPath = target.ijentPath
     ensurePathIsAbsolute(sourcePath)
     ensurePathIsAbsolute(targetPath)
-    fsBlocking {
-      var builder = source.nioFs.ijentFs.copyOptionsBuilder(sourcePath, targetPath)
-      for (option in options) {
-        builder = when (option) {
-          StandardCopyOption.REPLACE_EXISTING -> builder.replaceExisting()
-          StandardCopyOption.COPY_ATTRIBUTES -> builder.copyAttributes()
-          StandardCopyOption.ATOMIC_MOVE -> builder.atomicMove()
-          else -> {
-            thisLogger().warn("Unknown copy option: $option. This option will be ignored.")
-            builder
-          }
+
+    val fs = source.nioFs.ijentFs
+
+    val copyOptions = IjentFileSystemApi.copyOptionsBuilder(sourcePath, targetPath)
+    copyOptions.followLinks(true)
+
+    for (option in options) {
+      when (option) {
+        StandardCopyOption.REPLACE_EXISTING -> copyOptions.replaceExisting(true)
+        StandardCopyOption.COPY_ATTRIBUTES -> copyOptions.preserveAttributes(true)
+        ExtendedCopyOption.INTERRUPTIBLE -> copyOptions.interruptible(true)
+        LinkOption.NOFOLLOW_LINKS -> copyOptions.followLinks(false)
+        else -> {
+          thisLogger().warn("Unknown copy option: $option. This option will be ignored.")
         }
       }
-      source.nioFs.ijentFs.copy(builder.build())
+    }
+
+    fsBlocking {
+      try {
+        fs.copy(copyOptions)
+      } catch (e : IjentFileSystemApi.CopyException) {
+        e.throwFileSystemException()
+      }
     }
   }
 
   override fun move(source: Path, target: Path, vararg options: CopyOption?) {
-    TODO("Not yet implemented")
+    ensureIjentNioPath(source)
+    ensureIjentNioPath(target)
+    val sourcePath = source.ijentPath
+    val targetPath = target.ijentPath
+    ensurePathIsAbsolute(sourcePath)
+    ensurePathIsAbsolute(targetPath)
+    return fsBlocking {
+      try {
+        source.nioFs.ijentFs.move(
+          sourcePath,
+          targetPath,
+          replaceExisting = true,
+          followLinks = LinkOption.NOFOLLOW_LINKS !in options)
+      } catch (e : IjentFileSystemApi.MoveException) {
+        e.throwFileSystemException()
+      }
+    }
   }
 
   override fun isSameFile(path: Path, path2: Path): Boolean {
@@ -308,10 +378,10 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
   override fun <A : BasicFileAttributes> readAttributes(path: Path, type: Class<A>, vararg options: LinkOption): A {
     val fs = ensureIjentNioPath(path).nioFs
 
-    val result = when (fs.ijentFs) {
+    val result = when (val ijentFs = fs.ijentFs) {
       is IjentFileSystemPosixApi ->
         IjentNioPosixFileAttributes(fsBlocking {
-          statPosix(path.ijentPath, fs.ijentFs, LinkOption.NOFOLLOW_LINKS in options)
+          statPosix(path.ijentPath, ijentFs, LinkOption.NOFOLLOW_LINKS in options)
         })
 
       is IjentFileSystemWindowsApi -> TODO()
@@ -346,8 +416,29 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
     TODO("Not yet implemented")
   }
 
-  override fun createSymbolicLink(link: Path?, target: Path?, vararg attrs: FileAttribute<*>?) {
-    TODO("Not yet implemented")
+  override fun createSymbolicLink(link: Path, target: Path, vararg attrs: FileAttribute<*>?) {
+    if (attrs.isNotEmpty()) {
+      throw UnsupportedOperationException("Attributes are not supported for symbolic links")
+    }
+
+    val fs = ensureIjentNioPath(link).nioFs
+    val linkPath = ensurePathIsAbsolute(link.ijentPath)
+
+    require(ensureIjentNioPath(target).nioFs == fs) {
+      "Can't create symlinks between different file systems"
+    }
+
+    try {
+      fsBlocking {
+        when (val ijentFs = fs.ijentFs) {
+          is IjentFileSystemPosixApi -> ijentFs.createSymbolicLink(target.ijentPath, linkPath)
+          is IjentFileSystemWindowsApi -> TODO("Symbolic links are not supported on Windows")
+        }
+      }
+    }
+    catch (e: CreateSymbolicLinkException) {
+      e.throwFileSystemException()
+    }
   }
 
   override fun createLink(link: Path?, existing: Path?) {
@@ -357,6 +448,17 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
   override fun readSymbolicLink(link: Path?): Path {
     TODO("Not yet implemented")
   }
+
+  internal fun close(uri: URI) {
+    criticalSection {
+      authorityRegistry.remove(uri)
+    }
+  }
+
+  internal fun ijentFsApi(uri: URI): IjentFileSystemApi? =
+    criticalSection {
+      authorityRegistry[uri]
+    }
 
   @OptIn(ExperimentalContracts::class)
   private fun ensureIjentNioPath(path: Path): IjentNioPath {
@@ -384,11 +486,10 @@ class IjentNioFileSystemProvider : FileSystemProvider() {
   }
 
   private fun typicalUriChecks(uri: URI) {
-    require(uri.host.isNotEmpty())
+    require(uri.authority.isNotEmpty())
 
-    require(uri.scheme == scheme)
-    require(uri.userInfo.isNullOrEmpty())
-    require(uri.query.isNullOrEmpty())
-    require(uri.fragment.isNullOrEmpty())
+    require(uri.scheme == scheme) { "${uri.scheme} != $scheme" }
+    require(uri.query.isNullOrEmpty()) { uri.query }
+    require(uri.fragment.isNullOrEmpty()) { uri.fragment }
   }
 }

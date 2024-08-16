@@ -24,6 +24,7 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
   <dependencies>
     <plugin id="com.intellij.modules.lang"/>
     <plugin id="com.intellij.modules.python-core-capable"/>
+    <plugin id="com.intellij.modules.json"/>
     <plugin id="org.toml.lang"/>
   </dependencies>
 
@@ -88,6 +89,7 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
                      key="INSP.requirement.uninstalled.name" groupKey="INSP.GROUP.requirements" enabledByDefault="true" level="WARNING"
                      implementationClass="com.jetbrains.python.requirements.UnsatisfiedRequirementInspection"/>
 
+    <pluginSuggestionProvider order="first" implementation="com.jetbrains.python.suggestions.PycharmProSuggestionProvider"/>
   </extensions>
 
 
@@ -498,6 +500,7 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
     <statistics.projectUsagesCollector implementation="com.jetbrains.python.statistics.PyPackageVersionUsagesCollector"/>
     <statistics.projectUsagesCollector implementation="com.jetbrains.python.statistics.PyPackageInEditorUsageCollector"/>
     <statistics.projectUsagesCollector implementation="com.jetbrains.python.statistics.PyProjectTomlUsageCollector"/>
+    <statistics.projectUsagesCollector implementation="com.jetbrains.python.statistics.PyCompatibilityInspectionCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.jetbrains.python.namespacePackages.PyNamespacePackagesStatisticsCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.jetbrains.python.codeInsight.codeVision.PyCodeVisionUsageCollector"/>
     <statistics.counterUsagesCollector implementationClass="com.jetbrains.python.newProject.collector.PythonNewProjectWizardCollector"/>
@@ -621,9 +624,6 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
     <dependencyCollector kind="python" implementation="com.jetbrains.python.packaging.PyDependencyCollector"/>
     <lookup.usageDetails implementation="com.jetbrains.python.statistics.PyCompletionStatisticLogger"/>
     <statistics.collectorExtension implementation="com.jetbrains.python.statistics.PyCompletionUsageExtension"/>
-
-    <registryKey key="python.new.interpreter.creation.ui" defaultValue="true"
-                 description="Enable new UI for adding Python interpreter in New Project dialog."/>
 
     <!-- Parameter Info -->
     <registryKey key="python.parameter.info.show.all.hints" defaultValue="false"
@@ -854,7 +854,7 @@ The Python plug-in provides smart editing for Python scripts. The feature set of
 
   <actions>
     <action overrides="true" id="ForceStepInto" class="com.jetbrains.python.debugger.PyForceStepIntoAction"
-            icon="PlatformDebuggerImplIcons.Actions.Force_step_into"/>
+            icon="AllIcons.Debugger.ForceStepInto"/>
 
     <!-- Console -->
     <action id="com.jetbrains.python.console.RunPythonOrDebugConsoleAction"

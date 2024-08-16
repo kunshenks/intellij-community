@@ -922,7 +922,6 @@
     </group>
 
     <action id="RestartIde" class="com.intellij.ide.actions.RestartIdeAction"/>
-    <action id="RecoverCachesFromLog" class="com.intellij.ide.actions.cache.RecoverVfsFromLogAction"/>
 
     <group id="MainToolBar">
       <reference ref="OpenFile"/>
@@ -1251,8 +1250,6 @@
         <action id="SetCaretVisualAttributesInternalAction" internal="true" class="com.intellij.internal.SetCaretVisualAttributesAction"/>
         <action id="EditorRenderingBenchmarkAction" internal="true"
                 class="com.intellij.internal.performance.EditorRenderingBenchmarkAction"/>
-        <action id="ActionUpdatesBenchmarkAction" internal="true"
-                class="com.intellij.internal.performance.ActionUpdatesBenchmarkAction"/>
       </group>
       <group id="Internal.UI" popup="true">
         <group id="Internal.UI.Demos" popup="true">

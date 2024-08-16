@@ -1,4 +1,4 @@
-// Copyright 2000-2023 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
+// Copyright 2000-2024 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.codeInsight.hint;
 
 import com.intellij.codeInsight.AutoPopupController;
@@ -15,6 +15,7 @@ import com.intellij.injected.editor.EditorWindow;
 import com.intellij.lang.parameterInfo.ParameterInfoHandler;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.application.WriteIntentReadAction;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.Inlay;
 import com.intellij.openapi.editor.ScrollType;
@@ -109,7 +110,7 @@ public final class ParameterInfoController extends ParameterInfoControllerBase {
           @Override
           public void run() {
             if (activeLookup != null) {
-              updateComponent();
+              WriteIntentReadAction.run((Runnable)ParameterInfoController.this::updateComponent);
             }
           }
         });
@@ -506,12 +507,11 @@ public final class ParameterInfoController extends ParameterInfoControllerBase {
       myEditor = editor;
     }
 
-    @NotNull
-    private Pair<Point, Short> getBestPointPosition(LightweightHint hint,
-                                                    PsiElement list,
-                                                    int offset,
-                                                    VisualPosition pos,
-                                                    short preferredPosition) {
+    private @NotNull Pair<Point, Short> getBestPointPosition(LightweightHint hint,
+                                                             PsiElement list,
+                                                             int offset,
+                                                             VisualPosition pos,
+                                                             short preferredPosition) {
       if (list != null) {
         TextRange range = list.getTextRange();
         TextRange rangeWithoutParens = TextRange.from(range.getStartOffset() + 1, Math.max(range.getLength() - 2, 0));

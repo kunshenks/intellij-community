@@ -8,15 +8,12 @@ import com.intellij.java.compiler.charts.CompilationChartsViewModel.CpuMemorySta
 import com.intellij.ui.components.JBPanelWithEmptyText
 import com.intellij.ui.table.JBTable
 import com.intellij.util.concurrency.AppExecutorUtil
-import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
-import java.awt.image.BufferedImage
 import java.util.concurrent.ConcurrentSkipListSet
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.JButton
 import javax.swing.JViewport
 import javax.swing.SwingUtilities
@@ -37,12 +34,8 @@ class CompilationChartsDiagramsComponent(
   var memory: MutableSet<CompilationChartsViewModel.StatisticData> = ConcurrentSkipListSet()
   val statistic: Statistic = Statistic()
   var cpuMemory = MEMORY
-  private var shouldRepaint: Boolean = true
   private val mouseAdapter: CompilationChartsMouseAdapter
-  private var image: BufferedImage? = null
   private val charts: Charts
-
-  private val isRepaintScheduled = AtomicBoolean(false)
 
   private val focusableEmptyButton = JButton().apply {
     preferredSize = Dimension(0, 0)
@@ -73,7 +66,7 @@ class CompilationChartsDiagramsComponent(
     addMouseWheelListener { e ->
       if (e.isControlDown) {
         zoom.adjustUser(viewport, e.x, exp(e.preciseWheelRotation * -0.05))
-        forceRepaint()
+        smartDraw()
       }
       else {
         e.component.parent.dispatchEvent(e)
@@ -119,69 +112,37 @@ class CompilationChartsDiagramsComponent(
       }
     }
 
-    AppExecutorUtil.createBoundedScheduledExecutorService("Compilation charts component", 1).scheduleWithFixedDelay(
-      {
-        if (isRepaintScheduled.compareAndSet(true, false)) {
-          forceRepaint()
-        }
-      }, 0, 1, TimeUnit.SECONDS)
+    AppExecutorUtil.createBoundedScheduledExecutorService("Compilation charts component", 1)
+      .scheduleWithFixedDelay({ smartDraw() }, 0, 1, TimeUnit.SECONDS)
   }
 
-  internal fun forceRepaint() {
-    shouldRepaint = true
+  internal fun smartDraw() {
+    // todo check new data
+    // todo check viewport position
+    // todo check zoom
     revalidate()
     repaint()
   }
 
   override fun paintComponent(g2d: Graphics) {
     if (g2d !is Graphics2D) return
-    tryCacheImage(g2d) { saveToImage ->
-      return@tryCacheImage charts.model {
-        progress {
-          data(modules.data.getAndClean())
-          filter = modules.filter
-        }
-        usage(usages[cpuMemory]!!) {
-          data(stats[cpuMemory]!!.getAndClean(), when (cpuMemory) {
-            MEMORY -> vm.statistics.maxMemory
-            CPU -> 100
-          })
-        }
-      }.draw(g2d, this) {
-        val size = Dimension(width().toInt(), height().toInt())
-        if (size != this@CompilationChartsDiagramsComponent.preferredSize) {
-          this@CompilationChartsDiagramsComponent.preferredSize = size
-          this@CompilationChartsDiagramsComponent.revalidate()
-        }
-        if (saveToImage) {
-          UIUtil.createImage(this@CompilationChartsDiagramsComponent, width().toInt(), height().toInt(), BufferedImage.TYPE_INT_ARGB)
-        }
-        else {
-          g2d.setupRenderingHints()
-          null
-        }
+    charts.model {
+      progress {
+        model = modules.data
+        filter = modules.filter
       }
-    }
-  }
-
-  private fun tryCacheImage(g2d: Graphics2D, draw: (saveToImage: Boolean) -> BufferedImage?) {
-    if (zoom.shouldCacheImage()) {
-      if (!shouldRepaint) {
-        image?.let { img -> g2d.drawImage(img, this) }
-        return
+      usage(usages[cpuMemory]!!) {
+        model = stats[cpuMemory]!!
+        maximum = cpuMemory.max(vm.statistics)
       }
-
-      shouldRepaint = false
-      image?.flush()
-      image = draw(true)
+    }.draw(g2d) {
+      val size = Dimension(width().toInt(), height().toInt())
+      if (size != this@CompilationChartsDiagramsComponent.preferredSize) {
+        this@CompilationChartsDiagramsComponent.preferredSize = size
+        this@CompilationChartsDiagramsComponent.revalidate()
+      }
+      g2d.setupRenderingHints()
     }
-    else {
-      draw(false)
-    }
-  }
-
-  internal fun updateView() {
-    isRepaintScheduled.set(true)
   }
 
   internal fun setFocus() {
@@ -189,7 +150,6 @@ class CompilationChartsDiagramsComponent(
       focusableEmptyButton.requestFocusInWindow()
     }
   }
-
 
   override fun addNotify() {
     super.addNotify()
